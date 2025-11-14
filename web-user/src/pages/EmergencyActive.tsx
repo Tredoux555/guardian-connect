@@ -104,6 +104,47 @@ function EmergencyActive() {
     }
   }, [id])
 
+  // Continuous location sharing for real-time tracking
+  useEffect(() => {
+    if (!id || !emergency || emergency.status !== 'active') return
+    
+    const currentUserId = getCurrentUserId()
+    const isSender = String(currentUserId) === String(emergency.user_id)
+    
+    // Share location continuously for real-time tracking
+    const shareLocation = async () => {
+      if (!navigator.geolocation) return
+      
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          try {
+            await api.post(`/emergencies/${id}/location`, {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            })
+            console.log(`✅ ${isSender ? 'Sender' : 'Responder'} location updated:`, {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            })
+          } catch (err) {
+            console.error('Failed to share location:', err)
+          }
+        },
+        (error) => {
+          console.warn('Location permission denied or error:', error)
+        }
+      )
+    }
+    
+    // Share location immediately and then every 5 seconds for real-time tracking
+    shareLocation()
+    const locationInterval = setInterval(shareLocation, 5000)
+    
+    return () => {
+      clearInterval(locationInterval)
+    }
+  }, [id, emergency])
+
   const loadEmergency = async () => {
     try {
       const response = await api.get(`/emergencies/${id}`)
@@ -246,7 +287,8 @@ function EmergencyActive() {
   // Get marker icon based on location type
   // Sender: red pin (default Google Maps marker)
   // Receiver on sender's map: blue dot
-  const getMarkerIcon = (isSenderLocation: boolean, isSender: boolean): google.maps.Symbol | undefined => {
+  // Receiver's own location on receiver's map: blue dot
+  const getMarkerIcon = (isSenderLocation: boolean, isSender: boolean, isCurrentUserLocation: boolean): google.maps.Symbol | undefined => {
     try {
       if (typeof window === 'undefined') return undefined
       const google = (window as any).google
@@ -259,6 +301,18 @@ function EmergencyActive() {
       
       // Receiver location on sender's map: blue dot
       if (isSender) {
+        return {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: '#4285F4', // Google blue
+          fillOpacity: 1,
+          strokeColor: '#FFFFFF',
+          strokeWeight: 2,
+        }
+      }
+      
+      // Receiver's own location on receiver's map: blue dot
+      if (isCurrentUserLocation && !isSender) {
         return {
           path: google.maps.SymbolPath.CIRCLE,
           scale: 10,
@@ -390,7 +444,7 @@ function EmergencyActive() {
                   <Marker
                     key={`${location.user_id}-${location.timestamp || Date.now()}`}
                     position={{ lat: markerLat, lng: markerLng }}
-                    icon={getMarkerIcon(isSenderLocation, isSender) || undefined}
+                    icon={getMarkerIcon(isSenderLocation, isSender, isCurrentUserLocation) || undefined}
                     onClick={() => setSelectedLocation(location)}
                     label={isSenderLocation ? {
                       text: '🚨',
