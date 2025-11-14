@@ -136,16 +136,23 @@ function EmergencyActive() {
         return
       }
       
-      // Show all locations from API (sender + accepted responders only)
+      // Show ALL locations from API - both sender and accepted responders
       const locationsData = response.data.locations || []
+      const currentUserId = getCurrentUserId()
+      const isSender = String(currentUserId) === String(emergencyData.user_id)
       
       console.log('📍 Processing locations:', {
         count: locationsData.length,
+        isSender,
+        currentUserId,
+        emergencyUserId: emergencyData.user_id,
         locations: locationsData.map((loc: Location) => ({
           userId: loc.user_id,
           email: loc.user_email,
           lat: loc.latitude,
-          lng: loc.longitude
+          lng: loc.longitude,
+          isSenderLocation: String(loc.user_id) === String(emergencyData.user_id),
+          isCurrentUserLocation: String(loc.user_id) === String(currentUserId)
         }))
       })
       
@@ -156,12 +163,16 @@ function EmergencyActive() {
         )
         if (senderLoc) {
           setSenderLocation(senderLoc)
-          console.log('✅ Sender location found:', senderLoc)
         }
         
-        // Set all locations - backend only returns locations for sender + accepted responders
+        // IMPORTANT: Set ALL locations - both sender and receiver locations
+        // This ensures both markers appear on both maps
         setLocations(locationsData)
-        console.log('✅ Set locations state:', locationsData.length, 'locations')
+        console.log('✅ Set locations state - ALL locations will be shown:', {
+          totalLocations: locationsData.length,
+          senderLocation: senderLoc ? 'Found' : 'Missing',
+          responderLocations: locationsData.filter(l => String(l.user_id) !== String(emergencyData.user_id)).length
+        })
         
         // Center map on midpoint of all locations
         if (locationsData.length > 1) {
@@ -170,7 +181,6 @@ function EmergencyActive() {
           const avgLng = locationsData.reduce((sum: number, loc: Location) => 
             sum + parseFloat(loc.longitude.toString()), 0) / locationsData.length
           setMapCenter({ lat: avgLat, lng: avgLng })
-          console.log('✅ Map centered on midpoint:', { lat: avgLat, lng: avgLng })
         } else {
           // Single location - center on it
           const loc = locationsData[0]
@@ -178,12 +188,11 @@ function EmergencyActive() {
             lat: parseFloat(loc.latitude.toString()),
             lng: parseFloat(loc.longitude.toString()),
           })
-          console.log('✅ Map centered on single location:', loc)
         }
       } else {
         // No locations yet
         setLocations([])
-        console.log('⚠️ No locations in API response')
+        console.log('⚠️ No locations in API response yet')
       }
     } catch (err: any) {
       if (err.response?.status === 404) {
