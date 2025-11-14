@@ -129,34 +129,38 @@ function EmergencyActive() {
         return
       }
       
-      // Simple: Show all locations from API (sender + accepted responders)
-      if (response.data.locations && response.data.locations.length > 0) {
+      // Show all locations from API (sender + accepted responders only)
+      const locationsData = response.data.locations || []
+      
+      if (locationsData.length > 0) {
         // Find sender location for reference
-        const senderLoc = response.data.locations.find(
+        const senderLoc = locationsData.find(
           (loc: Location) => String(loc.user_id) === String(emergencyData.user_id)
         )
         if (senderLoc) {
           setSenderLocation(senderLoc)
         }
         
-        // Show all locations - API only returns locations for accepted participants
-        setLocations(response.data.locations)
+        // Set all locations - backend only returns locations for sender + accepted responders
+        setLocations(locationsData)
         
-        // Center map on all locations
-        if (response.data.locations.length > 1) {
-          const avgLat = response.data.locations.reduce((sum: number, loc: Location) => 
-            sum + parseFloat(loc.latitude.toString()), 0) / response.data.locations.length
-          const avgLng = response.data.locations.reduce((sum: number, loc: Location) => 
-            sum + parseFloat(loc.longitude.toString()), 0) / response.data.locations.length
+        // Center map on midpoint of all locations
+        if (locationsData.length > 1) {
+          const avgLat = locationsData.reduce((sum: number, loc: Location) => 
+            sum + parseFloat(loc.latitude.toString()), 0) / locationsData.length
+          const avgLng = locationsData.reduce((sum: number, loc: Location) => 
+            sum + parseFloat(loc.longitude.toString()), 0) / locationsData.length
           setMapCenter({ lat: avgLat, lng: avgLng })
         } else {
-          const loc = response.data.locations[0]
+          // Single location - center on it
+          const loc = locationsData[0]
           setMapCenter({
             lat: parseFloat(loc.latitude.toString()),
             lng: parseFloat(loc.longitude.toString()),
           })
         }
       } else {
+        // No locations yet
         setLocations([])
       }
     } catch (err: any) {
