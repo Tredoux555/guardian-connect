@@ -349,30 +349,47 @@ function EmergencyActive() {
                           <br />
                           <small>{location.user_email || 'Location'}</small>
                           {/* Navigation button for responders to navigate to sender */}
-                          {!isSender && isSenderLocation && senderLocation && (
-                            <>
-                              <br />
-                              <a
-                                href={`https://www.google.com/maps/dir/?api=1&destination=${senderLocation.latitude},${senderLocation.longitude}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ 
-                                  display: 'block', 
-                                  marginTop: '0.5rem', 
-                                  padding: '0.75rem',
-                                  backgroundColor: '#4285F4',
-                                  color: 'white',
-                                  textDecoration: 'none',
-                                  borderRadius: '4px',
-                                  fontSize: '1rem',
-                                  fontWeight: 'bold',
-                                  textAlign: 'center'
-                                }}
-                              >
-                                📍 Open in Google Maps for Directions
-                              </a>
-                            </>
-                          )}
+                          {!isSender && isSenderLocation && senderLocation && (() => {
+                            // Parse coordinates to ensure they're numbers
+                            const destLat = parseFloat(senderLocation.latitude.toString())
+                            const destLng = parseFloat(senderLocation.longitude.toString())
+                            
+                            // Find current user's location to use as origin
+                            const currentUserLoc = locations.find(loc => String(loc.user_id) === String(getCurrentUserId()))
+                            const origin = currentUserLoc 
+                              ? `${parseFloat(currentUserLoc.latitude.toString())},${parseFloat(currentUserLoc.longitude.toString())}`
+                              : undefined
+                            
+                            // Build Google Maps URL with origin if available
+                            const mapsUrl = origin
+                              ? `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destLat},${destLng}`
+                              : `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`
+                            
+                            return (
+                              <>
+                                <br />
+                                <a
+                                  href={mapsUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{ 
+                                    display: 'block', 
+                                    marginTop: '0.5rem', 
+                                    padding: '0.75rem',
+                                    backgroundColor: '#4285F4',
+                                    color: 'white',
+                                    textDecoration: 'none',
+                                    borderRadius: '4px',
+                                    fontSize: '1rem',
+                                    fontWeight: 'bold',
+                                    textAlign: 'center'
+                                  }}
+                                >
+                                  📍 Open in Google Maps for Directions
+                                </a>
+                              </>
+                            )
+                          })()}
                         </div>
                       </InfoWindow>
                     )}
