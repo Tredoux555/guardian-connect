@@ -304,95 +304,83 @@ function EmergencyActive() {
                 fullscreenControl: true,
               }}
             >
-              {/* Show all locations as markers */}
-              {mapLoaded && mapRef.current && typeof window !== 'undefined' && (window as any).google?.maps && locations.length > 0 && emergency && emergency.user_id && (() => {
-                console.log('🗺️ Rendering markers:', {
-                  mapLoaded,
-                  hasMapRef: !!mapRef.current,
-                  locationsCount: locations.length,
-                  locations: locations.map(l => ({
-                    userId: l.user_id,
-                    email: l.user_email,
-                    lat: l.latitude,
-                    lng: l.longitude
-                  }))
+              {/* Show ALL locations as markers - both sender and receiver on both maps */}
+              {mapLoaded && mapRef.current && typeof window !== 'undefined' && (window as any).google?.maps && locations.length > 0 && emergency && emergency.user_id && locations.map((location) => {
+                const lat = parseFloat(location.latitude.toString())
+                const lng = parseFloat(location.longitude.toString())
+                
+                if (isNaN(lat) || isNaN(lng)) {
+                  console.warn('⚠️ Invalid coordinates:', location)
+                  return null
+                }
+                
+                const currentUserId = getCurrentUserId()
+                const isSenderLocation = String(location.user_id) === String(emergency.user_id)
+                const isCurrentUserLocation = String(location.user_id) === String(currentUserId)
+                const isSender = String(currentUserId) === String(emergency.user_id)
+                const markerIcon = getMarkerIcon()
+                
+                console.log('📍 Rendering marker:', {
+                  userId: location.user_id,
+                  email: location.user_email,
+                  lat,
+                  lng,
+                  isSenderLocation,
+                  isCurrentUserLocation,
+                  currentUserId,
+                  emergencyUserId: emergency.user_id
                 })
                 
-                return locations.map((location) => {
-                  const lat = parseFloat(location.latitude.toString())
-                  const lng = parseFloat(location.longitude.toString())
-                  
-                  if (isNaN(lat) || isNaN(lng)) {
-                    console.warn('⚠️ Invalid coordinates:', location)
-                    return null
-                  }
-                  
-                  const currentUserId = getCurrentUserId()
-                  const isSenderLocation = String(location.user_id) === String(emergency.user_id)
-                  const isCurrentUserLocation = String(location.user_id) === String(currentUserId)
-                  const isSender = String(currentUserId) === String(emergency.user_id)
-                  const markerIcon = getMarkerIcon()
-                  
-                  console.log('📍 Rendering marker:', {
-                    userId: location.user_id,
-                    email: location.user_email,
-                    lat,
-                    lng,
-                    isSenderLocation,
-                    isCurrentUserLocation
-                  })
-                  
-                  return (
-                    <Marker
-                      key={`${location.user_id}-${location.timestamp || Date.now()}`}
-                      position={{ lat, lng }}
-                      icon={markerIcon || undefined}
-                      onClick={() => setSelectedLocation(location)}
-                    >
-                      {selectedLocation?.user_id === location.user_id && (
-                        <InfoWindow onCloseClick={() => setSelectedLocation(null)}>
-                          <div>
-                            <strong>
-                              {isSenderLocation 
-                                ? '🚨 Emergency Location (Sender)' 
-                                : isCurrentUserLocation
-                                ? '📍 Your Location (Responder)'
-                                : '📍 Responder Location'}
-                            </strong>
-                            <br />
-                            <small>{location.user_email || 'Location'}</small>
-                            {/* Navigation button for responders */}
-                            {!isSender && isSenderLocation && senderLocation && (
-                              <>
-                                <br />
-                                <a
-                                  href={`https://www.google.com/maps/dir/?api=1&destination=${senderLocation.latitude},${senderLocation.longitude}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  style={{ 
-                                    display: 'block', 
-                                    marginTop: '0.5rem', 
-                                    padding: '0.75rem',
-                                    backgroundColor: '#4285F4',
-                                    color: 'white',
-                                    textDecoration: 'none',
-                                    borderRadius: '4px',
-                                    fontSize: '1rem',
-                                    fontWeight: 'bold',
-                                    textAlign: 'center'
-                                  }}
-                                >
-                                  📍 Open in Google Maps for Directions
-                                </a>
-                              </>
-                            )}
-                          </div>
-                        </InfoWindow>
-                      )}
-                    </Marker>
-                  )
-                }).filter(Boolean)
-              })()}
+                return (
+                  <Marker
+                    key={`${location.user_id}-${location.timestamp || Date.now()}`}
+                    position={{ lat, lng }}
+                    icon={markerIcon || undefined}
+                    onClick={() => setSelectedLocation(location)}
+                  >
+                    {selectedLocation?.user_id === location.user_id && (
+                      <InfoWindow onCloseClick={() => setSelectedLocation(null)}>
+                        <div>
+                          <strong>
+                            {isSenderLocation 
+                              ? '🚨 Emergency Location (Sender)' 
+                              : isCurrentUserLocation
+                              ? '📍 Your Location (Responder)'
+                              : '📍 Responder Location'}
+                          </strong>
+                          <br />
+                          <small>{location.user_email || 'Location'}</small>
+                          {/* Navigation button for responders to navigate to sender */}
+                          {!isSender && isSenderLocation && senderLocation && (
+                            <>
+                              <br />
+                              <a
+                                href={`https://www.google.com/maps/dir/?api=1&destination=${senderLocation.latitude},${senderLocation.longitude}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ 
+                                  display: 'block', 
+                                  marginTop: '0.5rem', 
+                                  padding: '0.75rem',
+                                  backgroundColor: '#4285F4',
+                                  color: 'white',
+                                  textDecoration: 'none',
+                                  borderRadius: '4px',
+                                  fontSize: '1rem',
+                                  fontWeight: 'bold',
+                                  textAlign: 'center'
+                                }}
+                              >
+                                📍 Open in Google Maps for Directions
+                              </a>
+                            </>
+                          )}
+                        </div>
+                      </InfoWindow>
+                    )}
+                  </Marker>
+                )
+              }).filter(Boolean)}
             </GoogleMap>
           </GoogleMapsLoader>
           {locations.length === 0 && (
