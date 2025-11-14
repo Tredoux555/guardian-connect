@@ -27,7 +27,12 @@ function Home() {
     try {
       const response = await api.get('/emergencies/pending')
       setPendingEmergencies(response.data)
-    } catch (err) {
+    } catch (err: any) {
+      // Silently handle 401 - user might not be logged in or token expired
+      if (err.response?.status === 401) {
+        // Token refresh should handle this, but if it fails, ignore
+        return
+      }
       console.error('Failed to check pending emergencies:', err)
     }
   }
@@ -38,7 +43,12 @@ function Home() {
       if (response.data.emergency) {
         setActiveEmergency(response.data.emergency)
       }
-    } catch (err) {
+    } catch (err: any) {
+      // Silently handle 401 - user might not be logged in or token expired
+      if (err.response?.status === 401) {
+        // Token refresh should handle this, but if it fails, ignore
+        return
+      }
       console.error('Failed to check active emergency:', err)
     }
   }

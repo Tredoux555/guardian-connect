@@ -109,6 +109,13 @@ function EmergencyActive() {
       const response = await api.get(`/emergencies/${id}`)
       const emergencyData = response.data.emergency
       
+      console.log('📥 Emergency API Response:', {
+        emergency: emergencyData?.id,
+        locationsCount: response.data.locations?.length || 0,
+        locations: response.data.locations,
+        participantsCount: response.data.participants?.length || 0
+      })
+      
       // Validate emergency data has user_id
       if (!emergencyData || !emergencyData.user_id) {
         console.error('❌ Emergency data missing user_id:', emergencyData)
@@ -132,6 +139,16 @@ function EmergencyActive() {
       // Show all locations from API (sender + accepted responders only)
       const locationsData = response.data.locations || []
       
+      console.log('📍 Processing locations:', {
+        count: locationsData.length,
+        locations: locationsData.map((loc: Location) => ({
+          userId: loc.user_id,
+          email: loc.user_email,
+          lat: loc.latitude,
+          lng: loc.longitude
+        }))
+      })
+      
       if (locationsData.length > 0) {
         // Find sender location for reference
         const senderLoc = locationsData.find(
@@ -139,10 +156,12 @@ function EmergencyActive() {
         )
         if (senderLoc) {
           setSenderLocation(senderLoc)
+          console.log('✅ Sender location found:', senderLoc)
         }
         
         // Set all locations - backend only returns locations for sender + accepted responders
         setLocations(locationsData)
+        console.log('✅ Set locations state:', locationsData.length, 'locations')
         
         // Center map on midpoint of all locations
         if (locationsData.length > 1) {
@@ -151,6 +170,7 @@ function EmergencyActive() {
           const avgLng = locationsData.reduce((sum: number, loc: Location) => 
             sum + parseFloat(loc.longitude.toString()), 0) / locationsData.length
           setMapCenter({ lat: avgLat, lng: avgLng })
+          console.log('✅ Map centered on midpoint:', { lat: avgLat, lng: avgLng })
         } else {
           // Single location - center on it
           const loc = locationsData[0]
@@ -158,10 +178,12 @@ function EmergencyActive() {
             lat: parseFloat(loc.latitude.toString()),
             lng: parseFloat(loc.longitude.toString()),
           })
+          console.log('✅ Map centered on single location:', loc)
         }
       } else {
         // No locations yet
         setLocations([])
+        console.log('⚠️ No locations in API response')
       }
     } catch (err: any) {
       if (err.response?.status === 404) {
@@ -282,71 +304,95 @@ function EmergencyActive() {
                 fullscreenControl: true,
               }}
             >
-              {/* Simple: Show all locations as markers */}
-              {mapLoaded && mapRef.current && typeof window !== 'undefined' && (window as any).google?.maps && locations.length > 0 && emergency && emergency.user_id && locations.map((location) => {
-                const lat = parseFloat(location.latitude.toString())
-                const lng = parseFloat(location.longitude.toString())
+              {/* Show all locations as markers */}
+              {mapLoaded && mapRef.current && typeof window !== 'undefined' && (window as any).google?.maps && locations.length > 0 && emergency && emergency.user_id && (() => {
+                console.log('🗺️ Rendering markers:', {
+                  mapLoaded,
+                  hasMapRef: !!mapRef.current,
+                  locationsCount: locations.length,
+                  locations: locations.map(l => ({
+                    userId: l.user_id,
+                    email: l.user_email,
+                    lat: l.latitude,
+                    lng: l.longitude
+                  }))
+                })
                 
-                if (isNaN(lat) || isNaN(lng)) {
-                  return null
-                }
-                
-                const currentUserId = getCurrentUserId()
-                const isSenderLocation = String(location.user_id) === String(emergency.user_id)
-                const isCurrentUserLocation = String(location.user_id) === String(currentUserId)
-                const isSender = String(currentUserId) === String(emergency.user_id)
-                const markerIcon = getMarkerIcon()
-                
-                return (
-                  <Marker
-                    key={`${location.user_id}-${location.timestamp || Date.now()}`}
-                    position={{ lat, lng }}
-                    icon={markerIcon || undefined}
-                    onClick={() => setSelectedLocation(location)}
-                  >
-                    {selectedLocation?.user_id === location.user_id && (
-                      <InfoWindow onCloseClick={() => setSelectedLocation(null)}>
-                        <div>
-                          <strong>
-                            {isSenderLocation 
-                              ? '🚨 Emergency Location (Sender)' 
-                              : isCurrentUserLocation
-                              ? '📍 Your Location (Responder)'
-                              : '📍 Responder Location'}
-                          </strong>
-                          <br />
-                          <small>{location.user_email || 'Location'}</small>
-                          {/* Navigation button for responders */}
-                          {!isSender && isSenderLocation && senderLocation && (
-                            <>
-                              <br />
-                              <a
-                                href={`https://www.google.com/maps/dir/?api=1&destination=${senderLocation.latitude},${senderLocation.longitude}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ 
-                                  display: 'block', 
-                                  marginTop: '0.5rem', 
-                                  padding: '0.75rem',
-                                  backgroundColor: '#4285F4',
-                                  color: 'white',
-                                  textDecoration: 'none',
-                                  borderRadius: '4px',
-                                  fontSize: '1rem',
-                                  fontWeight: 'bold',
-                                  textAlign: 'center'
-                                }}
-                              >
-                                📍 Open in Google Maps for Directions
-                              </a>
-                            </>
-                          )}
-                        </div>
-                      </InfoWindow>
-                    )}
-                  </Marker>
-                )
-              }).filter(Boolean)}
+                return locations.map((location) => {
+                  const lat = parseFloat(location.latitude.toString())
+                  const lng = parseFloat(location.longitude.toString())
+                  
+                  if (isNaN(lat) || isNaN(lng)) {
+                    console.warn('⚠️ Invalid coordinates:', location)
+                    return null
+                  }
+                  
+                  const currentUserId = getCurrentUserId()
+                  const isSenderLocation = String(location.user_id) === String(emergency.user_id)
+                  const isCurrentUserLocation = String(location.user_id) === String(currentUserId)
+                  const isSender = String(currentUserId) === String(emergency.user_id)
+                  const markerIcon = getMarkerIcon()
+                  
+                  console.log('📍 Rendering marker:', {
+                    userId: location.user_id,
+                    email: location.user_email,
+                    lat,
+                    lng,
+                    isSenderLocation,
+                    isCurrentUserLocation
+                  })
+                  
+                  return (
+                    <Marker
+                      key={`${location.user_id}-${location.timestamp || Date.now()}`}
+                      position={{ lat, lng }}
+                      icon={markerIcon || undefined}
+                      onClick={() => setSelectedLocation(location)}
+                    >
+                      {selectedLocation?.user_id === location.user_id && (
+                        <InfoWindow onCloseClick={() => setSelectedLocation(null)}>
+                          <div>
+                            <strong>
+                              {isSenderLocation 
+                                ? '🚨 Emergency Location (Sender)' 
+                                : isCurrentUserLocation
+                                ? '📍 Your Location (Responder)'
+                                : '📍 Responder Location'}
+                            </strong>
+                            <br />
+                            <small>{location.user_email || 'Location'}</small>
+                            {/* Navigation button for responders */}
+                            {!isSender && isSenderLocation && senderLocation && (
+                              <>
+                                <br />
+                                <a
+                                  href={`https://www.google.com/maps/dir/?api=1&destination=${senderLocation.latitude},${senderLocation.longitude}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{ 
+                                    display: 'block', 
+                                    marginTop: '0.5rem', 
+                                    padding: '0.75rem',
+                                    backgroundColor: '#4285F4',
+                                    color: 'white',
+                                    textDecoration: 'none',
+                                    borderRadius: '4px',
+                                    fontSize: '1rem',
+                                    fontWeight: 'bold',
+                                    textAlign: 'center'
+                                  }}
+                                >
+                                  📍 Open in Google Maps for Directions
+                                </a>
+                              </>
+                            )}
+                          </div>
+                        </InfoWindow>
+                      )}
+                    </Marker>
+                  )
+                }).filter(Boolean)
+              })()}
             </GoogleMap>
           </GoogleMapsLoader>
           {locations.length === 0 && (
