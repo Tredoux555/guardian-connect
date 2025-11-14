@@ -41,9 +41,16 @@ app.use(cors({
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      // In development, allow any localhost origin
-      if (process.env.NODE_ENV !== 'production' && origin.includes('localhost')) {
-        callback(null, true);
+      // In development, allow any localhost origin or local network IPs
+      if (process.env.NODE_ENV !== 'production') {
+        if (origin.includes('localhost') || 
+            origin.includes('192.168.') || 
+            origin.includes('10.0.') || 
+            origin.includes('172.16.')) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
       } else {
         callback(new Error('Not allowed by CORS'));
       }
