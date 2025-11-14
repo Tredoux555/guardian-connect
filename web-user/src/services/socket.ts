@@ -78,8 +78,8 @@ export const onEmergencyCancelled = (callback: (data: any) => void) => {
   }
 }
 
-export const removeListener = (event: string, callback?: Function) => {
-  if (socket) {
+export const removeListener = (event: string, callback?: (...args: any[]) => void) => {
+  if (socket && callback) {
     socket.off(event, callback)
   }
 }

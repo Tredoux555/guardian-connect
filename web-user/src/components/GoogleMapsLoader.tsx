@@ -14,9 +14,7 @@ let mapsLoaded = false
 const isScriptLoaded = (): boolean => {
   if (typeof window === 'undefined') return false
   // Use bracket notation to avoid TypeScript global declaration conflicts
-  // @ts-expect-error - Checking for runtime existence of google, not using type declaration
   const win = window as Record<string, any>
-  // @ts-expect-error - Runtime check for google.maps availability
   if (win['google']?.maps) return true
   const scripts = document.getElementsByTagName('script')
   for (let i = 0; i < scripts.length; i++) {
@@ -31,9 +29,7 @@ const isScriptLoaded = (): boolean => {
 const isGoogleMapsReady = (): boolean => {
   if (typeof window === 'undefined') return false
   // Use bracket notation to avoid TypeScript global declaration conflicts
-  // @ts-expect-error - Checking for runtime existence of google, not using type declaration
   const win = window as Record<string, any>
-  // @ts-expect-error - Runtime check for google.maps availability
   return !!win['google']?.maps
 }
 

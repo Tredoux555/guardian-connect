@@ -218,7 +218,7 @@ function EmergencyActive() {
         console.log('✅ Set locations state - ALL locations will be shown:', {
           totalLocations: uniqueLocations.length,
           senderLocation: senderLoc ? 'Found' : 'Missing',
-          responderLocations: uniqueLocations.filter(l => String(l.user_id) !== String(emergencyData.user_id)).length
+          responderLocations: uniqueLocations.filter((l: Location) => String(l.user_id) !== String(emergencyData.user_id)).length
         })
         
         // Center map on midpoint of all locations
