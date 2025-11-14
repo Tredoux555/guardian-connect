@@ -286,46 +286,58 @@ function EmergencyActive() {
 
   // Get marker icon based on location type
   // Sender: red pin (default Google Maps marker)
-  // Receiver on sender's map: blue dot
-  // Receiver's own location on receiver's map: blue dot
+  // Receiver locations: blue dot (on both sender's and receiver's maps)
   const getMarkerIcon = (isSenderLocation: boolean, isSender: boolean, isCurrentUserLocation: boolean): google.maps.Symbol | undefined => {
     try {
       if (typeof window === 'undefined') return undefined
       const google = (window as any).google
-      if (!google?.maps?.SymbolPath) return undefined
+      if (!google?.maps?.SymbolPath) {
+        console.warn('⚠️ Google Maps SymbolPath not available yet')
+        return undefined
+      }
       
       // Sender location: red pin (default Google Maps marker - no custom icon)
       if (isSenderLocation) {
         return undefined // Use default red pin
       }
       
+      // All receiver locations should be blue dots (both on sender's map and receiver's own map)
+      // This includes:
+      // 1. Receiver locations on sender's map (isSender === true)
+      // 2. Receiver's own location on receiver's map (isCurrentUserLocation === true && isSender === false)
+      // 3. Other receiver locations on receiver's map (fallback - show as blue dot too)
+      
+      const blueDotIcon = {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 10,
+        fillColor: '#4285F4', // Google blue
+        fillOpacity: 1,
+        strokeColor: '#FFFFFF',
+        strokeWeight: 2,
+      }
+      
       // Receiver location on sender's map: blue dot
       if (isSender) {
-        return {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 10,
-          fillColor: '#4285F4', // Google blue
-          fillOpacity: 1,
-          strokeColor: '#FFFFFF',
-          strokeWeight: 2,
-        }
+        console.log('📍 Creating blue dot for receiver on sender map')
+        return blueDotIcon
       }
       
       // Receiver's own location on receiver's map: blue dot
       if (isCurrentUserLocation && !isSender) {
-        return {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 10,
-          fillColor: '#4285F4', // Google blue
-          fillOpacity: 1,
-          strokeColor: '#FFFFFF',
-          strokeWeight: 2,
-        }
+        console.log('📍 Creating blue dot for receiver own location')
+        return blueDotIcon
+      }
+      
+      // Other receiver locations on receiver's map: also blue dot
+      if (!isSenderLocation && !isSender) {
+        console.log('📍 Creating blue dot for other receiver location')
+        return blueDotIcon
       }
       
       // Default: use standard marker
       return undefined
     } catch (error) {
+      console.error('❌ Error creating marker icon:', error)
       return undefined
     }
   }
