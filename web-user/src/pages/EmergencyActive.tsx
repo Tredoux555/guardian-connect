@@ -96,8 +96,8 @@ function EmergencyActive() {
 
   useEffect(() => {
     loadEmergency()
-    // Only refresh emergency status occasionally (every 30 seconds) - no location updates
-    const interval = setInterval(loadEmergency, 30000) // Refresh every 30 seconds for status only
+    // Refresh emergency data every 5 seconds to catch new locations
+    const interval = setInterval(loadEmergency, 5000)
     
     return () => {
       clearInterval(interval)

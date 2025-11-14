@@ -80,26 +80,37 @@ function Home() {
       const response = await api.post('/emergencies/create', {})
       const emergencyId = response.data.emergency.id
       
-      // Immediately share location when emergency is created
+      setActiveEmergency(response.data.emergency)
+      
+      // Share location when emergency is created, then navigate
       if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          async (position) => {
-            try {
-              await api.post(`/emergencies/${emergencyId}/location`, {
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude,
-              })
-            } catch (err) {
-              console.error('Failed to share initial location:', err)
+        await new Promise<void>((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            async (position) => {
+              try {
+                await api.post(`/emergencies/${emergencyId}/location`, {
+                  latitude: position.coords.latitude,
+                  longitude: position.coords.longitude,
+                })
+                console.log('✅ Sender location shared:', {
+                  lat: position.coords.latitude,
+                  lng: position.coords.longitude
+                })
+                // Small delay to ensure location is saved
+                setTimeout(() => resolve(), 500)
+              } catch (err) {
+                console.error('Failed to share initial location:', err)
+                resolve() // Continue even if location sharing fails
+              }
+            },
+            () => {
+              // Location permission denied - still navigate
+              resolve()
             }
-          },
-          () => {
-            // Location permission denied - still navigate to emergency
-          }
-        )
+          )
+        })
       }
       
-      setActiveEmergency(response.data.emergency)
       navigate(`/emergency/${emergencyId}`)
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to trigger emergency')

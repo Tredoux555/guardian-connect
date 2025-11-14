@@ -39,7 +39,12 @@ function EmergencyResponse() {
                   latitude: position.coords.latitude,
                   longitude: position.coords.longitude,
                 })
-                resolve()
+                console.log('✅ Responder location shared:', {
+                  lat: position.coords.latitude,
+                  lng: position.coords.longitude
+                })
+                // Small delay to ensure location is saved
+                setTimeout(() => resolve(), 500)
               } catch (err) {
                 console.error('Failed to share location:', err)
                 resolve() // Continue even if location sharing fails
