@@ -203,7 +203,7 @@ router.post(
 
       // Get all user IDs
       const usersResult = await query('SELECT id FROM users', []);
-      const userIds = usersResult.rows.map((row) => row.id);
+      const userIds = usersResult.rows.map((row: any) => row.id);
 
       // Save broadcast message
       await query(

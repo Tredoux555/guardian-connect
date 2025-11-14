@@ -39,7 +39,7 @@ router.post(
       const contacts = contactsResult.rows;
 
       // Add all contacts as participants (status: pending)
-      const participantPromises = contacts.map(async (contact) => {
+      const participantPromises = contacts.map(async (contact: any) => {
         if (contact.contact_user_id) {
           // Contact is a registered user
           await Emergency.addParticipant(emergency.id, contact.contact_user_id);
@@ -49,7 +49,7 @@ router.post(
       });
 
       const participants = (await Promise.all(participantPromises)).filter(
-        (p) => p !== null
+        (p: any) => p !== null
       );
 
       // Send push notifications to all registered contacts
