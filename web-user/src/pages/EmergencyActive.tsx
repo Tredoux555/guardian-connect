@@ -404,6 +404,22 @@ function EmergencyActive() {
 
   const pendingParticipants = participants.filter((p: any) => p.status === 'pending')
   const rejectedParticipants = participants.filter((p: any) => p.status === 'rejected')
+  
+  // Get current user info for render
+  const currentUserId = getCurrentUserId()
+  const isSender = emergency ? String(currentUserId) === String(emergency.user_id) : false
+  
+  // Debug logging
+  console.log('🔍 Render Debug:', {
+    mapLoaded,
+    mapRefExists: !!mapRef.current,
+    googleMapsExists: !!(typeof window !== 'undefined' && (window as any).google?.maps),
+    locationsCount: locations.length,
+    emergencyExists: !!emergency,
+    emergencyUserId: emergency?.user_id,
+    GOOGLE_MAPS_API_KEY: !!GOOGLE_MAPS_API_KEY,
+    isSender
+  })
 
   return (
     <div className="emergency-active">
@@ -433,7 +449,8 @@ function EmergencyActive() {
               }}
             >
               {/* Show ALL locations as markers - both sender and receiver on both maps */}
-              {mapLoaded && mapRef.current && typeof window !== 'undefined' && (window as any).google?.maps && locations.length > 0 && emergency && emergency.user_id && locations.map((location, index) => {
+              {/* Less strict conditions - render markers even if map isn't fully loaded yet */}
+              {(mapLoaded || locations.length > 0) && locations.length > 0 && emergency && emergency.user_id && locations.map((location, index) => {
                 const lat = parseFloat(location.latitude.toString())
                 const lng = parseFloat(location.longitude.toString())
                 
@@ -441,10 +458,8 @@ function EmergencyActive() {
                   return null
                 }
                 
-                const currentUserId = getCurrentUserId()
                 const isSenderLocation = String(location.user_id) === String(emergency.user_id)
                 const isCurrentUserLocation = String(location.user_id) === String(currentUserId)
-                const isSender = String(currentUserId) === String(emergency.user_id)
                 
                 // Add minimal offset for overlapping markers (very small - only if multiple markers at same spot)
                 // This prevents complete overlap while keeping accurate GPS coordinates
@@ -622,6 +637,84 @@ function EmergencyActive() {
         <div className="map-warning">
           <p>⚠️ Google Maps API key not configured</p>
           <p className="map-hint">Add VITE_GOOGLE_MAPS_API_KEY to your .env file to enable maps</p>
+        </div>
+      )}
+
+      {/* Visible Google Maps link for responders */}
+      {locations.length > 0 && senderLocation && !isSender && (
+        <div className="maps-link-container" style={{ 
+          padding: '1rem', 
+          backgroundColor: '#f5f5f5', 
+          borderRadius: '8px', 
+          margin: '1rem 0',
+          textAlign: 'center'
+        }}>
+          {(() => {
+            const currentUserLoc = locations.find(loc => String(loc.user_id) === String(currentUserId))
+            const destLat = parseFloat(senderLocation.latitude.toString())
+            const destLng = parseFloat(senderLocation.longitude.toString())
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+            const isMacOS = navigator.platform === 'MacIntel'
+            const useAppleMaps = isIOS || isMacOS
+            
+            if (currentUserLoc) {
+              const originLat = parseFloat(currentUserLoc.latitude.toString())
+              const originLng = parseFloat(currentUserLoc.longitude.toString())
+              const latDiff = Math.abs(originLat - destLat)
+              const lngDiff = Math.abs(originLng - destLng)
+              const distance = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff)
+              const isSameLocation = distance < 0.001
+              
+              const mapsUrl = getMapsUrl(
+                isSameLocation ? null : originLat,
+                isSameLocation ? null : originLng,
+                destLat,
+                destLng,
+                isSameLocation
+              )
+              
+              return (
+                <a
+                  href={mapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ 
+                    display: 'inline-block', 
+                    padding: '1rem 2rem',
+                    backgroundColor: '#4285F4',
+                    color: 'white',
+                    textDecoration: 'none',
+                    borderRadius: '8px',
+                    fontSize: '1.1rem',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  {getMapsButtonText(isSameLocation, useAppleMaps)}
+                </a>
+              )
+            }
+            
+            const mapsUrl = getMapsUrl(null, null, destLat, destLng, false)
+            return (
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ 
+                  display: 'inline-block', 
+                  padding: '1rem 2rem',
+                  backgroundColor: '#4285F4',
+                  color: 'white',
+                  textDecoration: 'none',
+                  borderRadius: '8px',
+                  fontSize: '1.1rem',
+                  fontWeight: 'bold'
+                }}
+              >
+                {getMapsButtonText(false, useAppleMaps)}
+              </a>
+            )
+          })()}
         </div>
       )}
 
