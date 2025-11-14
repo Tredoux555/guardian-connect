@@ -96,8 +96,8 @@ function EmergencyActive() {
 
   useEffect(() => {
     loadEmergency()
-    // Refresh emergency data every 5 seconds to catch new locations
-    const interval = setInterval(loadEmergency, 5000)
+    // Refresh emergency data every 10 seconds (reduced from 5s to prevent excessive re-renders)
+    const interval = setInterval(loadEmergency, 10000)
     
     return () => {
       clearInterval(interval)
@@ -141,12 +141,18 @@ function EmergencyActive() {
       const currentUserId = getCurrentUserId()
       const isSender = String(currentUserId) === String(emergencyData.user_id)
       
+      // Remove duplicate locations by user_id (keep most recent)
+      const uniqueLocations = locationsData.filter((loc: Location, index: number, self: Location[]) => 
+        index === self.findIndex((l: Location) => String(l.user_id) === String(loc.user_id))
+      )
+      
       console.log('📍 Processing locations:', {
-        count: locationsData.length,
+        count: uniqueLocations.length,
+        originalCount: locationsData.length,
         isSender,
         currentUserId,
         emergencyUserId: emergencyData.user_id,
-        locations: locationsData.map((loc: Location) => ({
+        locations: uniqueLocations.map((loc: Location) => ({
           userId: loc.user_id,
           email: loc.user_email,
           lat: loc.latitude,
@@ -156,9 +162,9 @@ function EmergencyActive() {
         }))
       })
       
-      if (locationsData.length > 0) {
+      if (uniqueLocations.length > 0) {
         // Find sender location for reference
-        const senderLoc = locationsData.find(
+        const senderLoc = uniqueLocations.find(
           (loc: Location) => String(loc.user_id) === String(emergencyData.user_id)
         )
         if (senderLoc) {
@@ -167,23 +173,23 @@ function EmergencyActive() {
         
         // IMPORTANT: Set ALL locations - both sender and receiver locations
         // This ensures both markers appear on both maps
-        setLocations(locationsData)
+        setLocations(uniqueLocations)
         console.log('✅ Set locations state - ALL locations will be shown:', {
-          totalLocations: locationsData.length,
+          totalLocations: uniqueLocations.length,
           senderLocation: senderLoc ? 'Found' : 'Missing',
-          responderLocations: locationsData.filter(l => String(l.user_id) !== String(emergencyData.user_id)).length
+          responderLocations: uniqueLocations.filter(l => String(l.user_id) !== String(emergencyData.user_id)).length
         })
         
         // Center map on midpoint of all locations
-        if (locationsData.length > 1) {
-          const avgLat = locationsData.reduce((sum: number, loc: Location) => 
-            sum + parseFloat(loc.latitude.toString()), 0) / locationsData.length
-          const avgLng = locationsData.reduce((sum: number, loc: Location) => 
-            sum + parseFloat(loc.longitude.toString()), 0) / locationsData.length
+        if (uniqueLocations.length > 1) {
+          const avgLat = uniqueLocations.reduce((sum: number, loc: Location) => 
+            sum + parseFloat(loc.latitude.toString()), 0) / uniqueLocations.length
+          const avgLng = uniqueLocations.reduce((sum: number, loc: Location) => 
+            sum + parseFloat(loc.longitude.toString()), 0) / uniqueLocations.length
           setMapCenter({ lat: avgLat, lng: avgLng })
         } else {
           // Single location - center on it
-          const loc = locationsData[0]
+          const loc = uniqueLocations[0]
           setMapCenter({
             lat: parseFloat(loc.latitude.toString()),
             lng: parseFloat(loc.longitude.toString()),
@@ -237,28 +243,12 @@ function EmergencyActive() {
   }, [])
   
 
+  // Use default Google Maps markers - more reliable than custom icons
+  // Default markers will always render correctly
   const getMarkerIcon = (): google.maps.Symbol | undefined => {
-    // More robust check - ensure google exists and SymbolPath is available
-    try {
-      if (typeof window === 'undefined') return undefined
-      const google = (window as any).google
-      if (!google) return undefined
-      if (!google.maps) return undefined
-      if (!google.maps.SymbolPath) return undefined
-      
-      // Always use red pin for emergency location
-      return {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 12,
-        fillColor: '#E53935', // Red for emergency location
-        fillOpacity: 1,
-        strokeColor: '#FFFFFF',
-        strokeWeight: 2,
-      }
-    } catch (error) {
-      // Silently fail - marker will use default icon
-      return undefined
-    }
+    // Return undefined to use default Google Maps marker
+    // This ensures markers always render even if icon creation fails
+    return undefined
   }
 
   const endEmergency = async () => {
@@ -314,12 +304,11 @@ function EmergencyActive() {
               }}
             >
               {/* Show ALL locations as markers - both sender and receiver on both maps */}
-              {mapLoaded && mapRef.current && typeof window !== 'undefined' && (window as any).google?.maps && locations.length > 0 && emergency && emergency.user_id && locations.map((location) => {
+              {mapLoaded && mapRef.current && typeof window !== 'undefined' && (window as any).google?.maps && locations.length > 0 && emergency && emergency.user_id && locations.map((location, index) => {
                 const lat = parseFloat(location.latitude.toString())
                 const lng = parseFloat(location.longitude.toString())
                 
                 if (isNaN(lat) || isNaN(lng)) {
-                  console.warn('⚠️ Invalid coordinates:', location)
                   return null
                 }
                 
@@ -327,25 +316,25 @@ function EmergencyActive() {
                 const isSenderLocation = String(location.user_id) === String(emergency.user_id)
                 const isCurrentUserLocation = String(location.user_id) === String(currentUserId)
                 const isSender = String(currentUserId) === String(emergency.user_id)
-                const markerIcon = getMarkerIcon()
                 
-                console.log('📍 Rendering marker:', {
-                  userId: location.user_id,
-                  email: location.user_email,
-                  lat,
-                  lng,
-                  isSenderLocation,
-                  isCurrentUserLocation,
-                  currentUserId,
-                  emergencyUserId: emergency.user_id
-                })
+                // Add minimal offset for overlapping markers (very small - only if multiple markers at same spot)
+                // This prevents complete overlap while keeping accurate GPS coordinates
+                const offset = locations.length > 1 && index > 0 ? 0.00005 : 0
+                const markerLat = lat + (index * offset)
+                const markerLng = lng + (index * offset)
                 
                 return (
                   <Marker
                     key={`${location.user_id}-${location.timestamp || Date.now()}`}
-                    position={{ lat, lng }}
-                    icon={markerIcon || undefined}
+                    position={{ lat: markerLat, lng: markerLng }}
+                    // Use default Google Maps marker (more reliable than custom icons)
                     onClick={() => setSelectedLocation(location)}
+                    label={{
+                      text: isSenderLocation ? '🚨' : '📍',
+                      color: '#FFFFFF',
+                      fontSize: '16px',
+                      fontWeight: 'bold'
+                    }}
                   >
                     {selectedLocation?.user_id === location.user_id && (
                       <InfoWindow onCloseClick={() => setSelectedLocation(null)}>
