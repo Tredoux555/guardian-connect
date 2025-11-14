@@ -243,12 +243,75 @@ function EmergencyActive() {
   }, [])
   
 
-  // Use default Google Maps markers - more reliable than custom icons
-  // Default markers will always render correctly
-  const getMarkerIcon = (): google.maps.Symbol | undefined => {
-    // Return undefined to use default Google Maps marker
-    // This ensures markers always render even if icon creation fails
-    return undefined
+  // Get marker icon based on location type
+  // Sender: red pin (default Google Maps marker)
+  // Receiver on sender's map: blue dot
+  const getMarkerIcon = (isSenderLocation: boolean, isSender: boolean): google.maps.Symbol | undefined => {
+    try {
+      if (typeof window === 'undefined') return undefined
+      const google = (window as any).google
+      if (!google?.maps?.SymbolPath) return undefined
+      
+      // Sender location: red pin (default Google Maps marker - no custom icon)
+      if (isSenderLocation) {
+        return undefined // Use default red pin
+      }
+      
+      // Receiver location on sender's map: blue dot
+      if (isSender) {
+        return {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: '#4285F4', // Google blue
+          fillOpacity: 1,
+          strokeColor: '#FFFFFF',
+          strokeWeight: 2,
+        }
+      }
+      
+      // Default: use standard marker
+      return undefined
+    } catch (error) {
+      return undefined
+    }
+  }
+
+  // Helper function to get maps URL (Apple Maps for iOS/macOS, Google Maps for others)
+  const getMapsUrl = (originLat: number | null, originLng: number | null, destLat: number, destLng: number, isSameLocation: boolean) => {
+    // Detect iOS/macOS devices
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    const isMacOS = navigator.platform === 'MacIntel'
+    const useAppleMaps = isIOS || isMacOS
+    
+    if (useAppleMaps) {
+      // Use Apple Maps URL scheme (http://maps.apple.com/)
+      if (isSameLocation) {
+        // Just show the location
+        return `http://maps.apple.com/?ll=${destLat},${destLng}`
+      } else if (originLat !== null && originLng !== null) {
+        // Directions with origin
+        return `http://maps.apple.com/?saddr=${originLat},${originLng}&daddr=${destLat},${destLng}`
+      } else {
+        // Directions without origin (will use current location)
+        return `http://maps.apple.com/?daddr=${destLat},${destLng}`
+      }
+    } else {
+      // Use Google Maps for other devices
+      if (isSameLocation) {
+        return `https://www.google.com/maps/?q=${destLat},${destLng}`
+      } else if (originLat !== null && originLng !== null) {
+        return `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}`
+      } else {
+        return `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`
+      }
+    }
+  }
+
+  const getMapsButtonText = (isSameLocation: boolean, useAppleMaps: boolean) => {
+    if (isSameLocation) {
+      return useAppleMaps ? '📍 View Location in Maps' : '📍 View Location in Google Maps'
+    }
+    return useAppleMaps ? '📍 Open in Maps for Directions' : '📍 Open in Google Maps for Directions'
   }
 
   const endEmergency = async () => {
@@ -327,14 +390,14 @@ function EmergencyActive() {
                   <Marker
                     key={`${location.user_id}-${location.timestamp || Date.now()}`}
                     position={{ lat: markerLat, lng: markerLng }}
-                    // Use default Google Maps marker (more reliable than custom icons)
+                    icon={getMarkerIcon(isSenderLocation, isSender) || undefined}
                     onClick={() => setSelectedLocation(location)}
-                    label={{
-                      text: isSenderLocation ? '🚨' : '📍',
+                    label={isSenderLocation ? {
+                      text: '🚨',
                       color: '#FFFFFF',
                       fontSize: '16px',
                       fontWeight: 'bold'
-                    }}
+                    } : undefined} // Only show label on sender location
                   >
                     {selectedLocation?.user_id === location.user_id && (
                       <InfoWindow onCloseClick={() => setSelectedLocation(null)}>
@@ -357,6 +420,10 @@ function EmergencyActive() {
                             // Find current user's location to use as origin
                             const currentUserLoc = locations.find(loc => String(loc.user_id) === String(getCurrentUserId()))
                             
+                            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+                            const isMacOS = navigator.platform === 'MacIntel'
+                            const useAppleMaps = isIOS || isMacOS
+                            
                             if (currentUserLoc) {
                               const originLat = parseFloat(currentUserLoc.latitude.toString())
                               const originLng = parseFloat(currentUserLoc.longitude.toString())
@@ -366,11 +433,18 @@ function EmergencyActive() {
                               const lngDiff = Math.abs(originLng - destLng)
                               const distance = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff)
                               
-                              // If locations are the same or very close (less than ~100 meters), just show the location
-                              // 0.001 degrees ≈ 111 meters
-                              if (distance < 0.001) {
-                                // User is already at/near the emergency location - just show the location
-                                const mapsUrl = `https://www.google.com/maps/?q=${destLat},${destLng}`
+                              // If locations are the same or very close (less than ~100 meters)
+                              const isSameLocation = distance < 0.001
+                              
+                              const mapsUrl = getMapsUrl(
+                                isSameLocation ? null : originLat,
+                                isSameLocation ? null : originLng,
+                                destLat,
+                                destLng,
+                                isSameLocation
+                              )
+                              
+                              if (isSameLocation) {
                                 return (
                                   <>
                                     <br />
@@ -402,15 +476,11 @@ function EmergencyActive() {
                                         textAlign: 'center'
                                       }}
                                     >
-                                      📍 View Location in Google Maps
+                                      {getMapsButtonText(true, useAppleMaps)}
                                     </a>
                                   </>
                                 )
                               }
-                              
-                              // Locations are different - show directions
-                              const origin = `${originLat},${originLng}`
-                              const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destLat},${destLng}`
                               
                               return (
                                 <>
@@ -432,14 +502,14 @@ function EmergencyActive() {
                                       textAlign: 'center'
                                     }}
                                   >
-                                    📍 Open in Google Maps for Directions
+                                    {getMapsButtonText(false, useAppleMaps)}
                                   </a>
                                 </>
                               )
                             }
                             
                             // No origin location available - just show destination
-                            const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`
+                            const mapsUrl = getMapsUrl(null, null, destLat, destLng, false)
                             return (
                               <>
                                 <br />
@@ -460,7 +530,7 @@ function EmergencyActive() {
                                     textAlign: 'center'
                                   }}
                                 >
-                                  📍 Open in Google Maps for Directions
+                                  {getMapsButtonText(false, useAppleMaps)}
                                 </a>
                               </>
                             )
