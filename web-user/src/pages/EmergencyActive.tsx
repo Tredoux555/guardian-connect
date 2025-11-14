@@ -356,15 +356,90 @@ function EmergencyActive() {
                             
                             // Find current user's location to use as origin
                             const currentUserLoc = locations.find(loc => String(loc.user_id) === String(getCurrentUserId()))
-                            const origin = currentUserLoc 
-                              ? `${parseFloat(currentUserLoc.latitude.toString())},${parseFloat(currentUserLoc.longitude.toString())}`
-                              : undefined
                             
-                            // Build Google Maps URL with origin if available
-                            const mapsUrl = origin
-                              ? `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destLat},${destLng}`
-                              : `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`
+                            if (currentUserLoc) {
+                              const originLat = parseFloat(currentUserLoc.latitude.toString())
+                              const originLng = parseFloat(currentUserLoc.longitude.toString())
+                              
+                              // Calculate distance between origin and destination
+                              const latDiff = Math.abs(originLat - destLat)
+                              const lngDiff = Math.abs(originLng - destLng)
+                              const distance = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff)
+                              
+                              // If locations are the same or very close (less than ~100 meters), just show the location
+                              // 0.001 degrees ≈ 111 meters
+                              if (distance < 0.001) {
+                                // User is already at/near the emergency location - just show the location
+                                const mapsUrl = `https://www.google.com/maps/?q=${destLat},${destLng}`
+                                return (
+                                  <>
+                                    <br />
+                                    <div style={{ 
+                                      marginTop: '0.5rem', 
+                                      padding: '0.75rem',
+                                      backgroundColor: '#f0f0f0',
+                                      borderRadius: '4px',
+                                      fontSize: '0.9rem',
+                                      textAlign: 'center',
+                                      color: '#666'
+                                    }}>
+                                      You are already at the emergency location
+                                    </div>
+                                    <a
+                                      href={mapsUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      style={{ 
+                                        display: 'block', 
+                                        marginTop: '0.5rem', 
+                                        padding: '0.75rem',
+                                        backgroundColor: '#4285F4',
+                                        color: 'white',
+                                        textDecoration: 'none',
+                                        borderRadius: '4px',
+                                        fontSize: '1rem',
+                                        fontWeight: 'bold',
+                                        textAlign: 'center'
+                                      }}
+                                    >
+                                      📍 View Location in Google Maps
+                                    </a>
+                                  </>
+                                )
+                              }
+                              
+                              // Locations are different - show directions
+                              const origin = `${originLat},${originLng}`
+                              const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destLat},${destLng}`
+                              
+                              return (
+                                <>
+                                  <br />
+                                  <a
+                                    href={mapsUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ 
+                                      display: 'block', 
+                                      marginTop: '0.5rem', 
+                                      padding: '0.75rem',
+                                      backgroundColor: '#4285F4',
+                                      color: 'white',
+                                      textDecoration: 'none',
+                                      borderRadius: '4px',
+                                      fontSize: '1rem',
+                                      fontWeight: 'bold',
+                                      textAlign: 'center'
+                                    }}
+                                  >
+                                    📍 Open in Google Maps for Directions
+                                  </a>
+                                </>
+                              )
+                            }
                             
+                            // No origin location available - just show destination
+                            const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`
                             return (
                               <>
                                 <br />
