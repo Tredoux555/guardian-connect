@@ -74,23 +74,36 @@ export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
       googleMapsApiKey={GOOGLE_MAPS_API_KEY}
       loadingElement={<div style={{ padding: '20px', textAlign: 'center' }}>Loading Google Maps...</div>}
       onLoad={() => {
-        // Wait a bit to ensure google.maps is fully initialized
-        setTimeout(() => {
+        // Wait longer and check multiple times to ensure google.maps is fully initialized
+        const checkReady = (attempt = 0, maxAttempts = 10) => {
           if (isGoogleMapsReady()) {
-            mapsLoaded = true
-            setIsReady(true)
-            console.log('✅ Google Maps API loaded successfully')
+            // Double-check that Marker class is available
+            const win = window as Record<string, any>
+            if (win['google']?.maps?.Marker || win['google']?.maps?.marker?.AdvancedMarkerElement) {
+              mapsLoaded = true
+              setIsReady(true)
+              console.log('✅ Google Maps API loaded successfully')
+              return
+            }
+          }
+          
+          if (attempt < maxAttempts) {
+            setTimeout(() => checkReady(attempt + 1, maxAttempts), 200)
           } else {
-            console.warn('⚠️ LoadScript onLoad fired but window.google.maps not available')
-            // Retry after a delay
+            console.warn('⚠️ LoadScript onLoad fired but window.google.maps not available after multiple attempts')
+            // Final retry after longer delay
             setTimeout(() => {
               if (isGoogleMapsReady()) {
                 mapsLoaded = true
                 setIsReady(true)
+                console.log('✅ Google Maps API loaded (delayed)')
               }
-            }, 500)
+            }, 1000)
           }
-        }, 100)
+        }
+        
+        // Start checking after initial delay
+        setTimeout(() => checkReady(), 300)
       }}
       onError={(error) => {
         console.error('❌ Google Maps load error:', error)

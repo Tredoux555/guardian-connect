@@ -5,6 +5,7 @@ import { query } from '../database/db';
 import { sendEmergencyAlert } from '../services/push';
 import { emitToEmergency } from '../services/socket';
 import { AuthRequest, authenticate } from '../middleware/auth';
+import messageRoutes from './messages';
 
 const router = express.Router();
 
@@ -387,6 +388,9 @@ router.post(
     }
   }
 );
+
+// Mount message routes
+router.use('/', messageRoutes);
 
 export default router;
 

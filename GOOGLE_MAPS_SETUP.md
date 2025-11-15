@@ -45,3 +45,7 @@ VITE_GOOGLE_MAPS_API_KEY=your-actual-api-key-here
 The map will show a warning if the API key is not configured. This is normal for development - you can test the rest of the app without it, but maps won't display.
 
 
+
+
+
+

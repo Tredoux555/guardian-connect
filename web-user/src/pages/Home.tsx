@@ -83,32 +83,55 @@ function Home() {
       setActiveEmergency(response.data.emergency)
       
       // Share location when emergency is created, then navigate
+      // Improved with timeout, better error handling, and longer wait for mobile
       if (navigator.geolocation) {
         await new Promise<void>((resolve) => {
+          const timeout = setTimeout(() => {
+            console.warn('⚠️ Location request timed out, navigating anyway')
+            resolve()
+          }, 8000) // 8 second timeout for mobile
+          
           navigator.geolocation.getCurrentPosition(
             async (position) => {
+              clearTimeout(timeout)
               try {
-                await api.post(`/emergencies/${emergencyId}/location`, {
+                const locationResponse = await api.post(`/emergencies/${emergencyId}/location`, {
                   latitude: position.coords.latitude,
                   longitude: position.coords.longitude,
                 })
-                console.log('✅ Sender location shared:', {
+                console.log('✅ Sender location shared successfully:', {
                   lat: position.coords.latitude,
-                  lng: position.coords.longitude
+                  lng: position.coords.longitude,
+                  response: locationResponse.status
                 })
-                // Small delay to ensure location is saved
-                setTimeout(() => resolve(), 500)
-              } catch (err) {
-                console.error('Failed to share initial location:', err)
-                resolve() // Continue even if location sharing fails
+                // Longer delay on mobile to ensure location is saved to database
+                setTimeout(() => resolve(), 1500)
+              } catch (err: any) {
+                console.error('❌ Failed to share initial location:', err)
+                // Still navigate even if location sharing fails
+                // EmergencyActive will try to share location again
+                resolve()
               }
             },
-            () => {
-              // Location permission denied - still navigate
-              resolve()
+            (err) => {
+              clearTimeout(timeout)
+              console.error('❌ Location error:', err)
+              // Show user-friendly message for permission denial
+              if (err.code === 1) {
+                console.warn('⚠️ Location permission denied. Emergency created but location not shared.')
+                // Don't block navigation - EmergencyActive will try again
+              }
+              resolve() // Continue navigation even if location fails
+            },
+            {
+              timeout: 7000, // 7 second timeout
+              enableHighAccuracy: true, // Better accuracy on mobile
+              maximumAge: 0 // Don't use cached location
             }
           )
         })
+      } else {
+        console.warn('⚠️ Geolocation not supported in this browser')
       }
       
       navigate(`/emergency/${emergencyId}`)

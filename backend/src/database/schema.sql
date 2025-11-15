@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS emergency_messages (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     message TEXT,
     image_url VARCHAR(500),
+    audio_url VARCHAR(500),
+    video_url VARCHAR(500),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

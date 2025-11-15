@@ -99,3 +99,7 @@ When moving to production:
 5. Update API URLs to production domains
 6. Configure CORS for production domains only
 
+
+
+
+

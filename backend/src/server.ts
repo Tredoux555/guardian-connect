@@ -2,6 +2,7 @@ import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import * as dotenv from 'dotenv';
+import path from 'path';
 import { createServer } from 'http';
 import authRoutes from './routes/auth';
 import emergencyRoutes from './routes/emergencies';
@@ -35,25 +36,25 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    if (!origin) {
+      console.log('✅ CORS: Allowing request with no origin');
+      return callback(null, true);
+    }
     
-    // Check if origin is in allowed list
+    // In development, allow ALL origins for easier testing
+    // This prevents CORS issues when frontend and backend are on different IPs/ports
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('✅ CORS: Allowing origin in development:', origin);
+      return callback(null, true);
+    }
+    
+    // In production, check allowed origins
     if (allowedOrigins.indexOf(origin) !== -1) {
+      console.log('✅ CORS: Allowing origin from allowed list:', origin);
       callback(null, true);
     } else {
-      // In development, allow any localhost origin or local network IPs
-      if (process.env.NODE_ENV !== 'production') {
-        if (origin.includes('localhost') || 
-            origin.includes('192.168.') || 
-            origin.includes('10.0.') || 
-            origin.includes('172.16.')) {
-          callback(null, true);
-        } else {
-          callback(new Error('Not allowed by CORS'));
-        }
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
+      console.warn('❌ CORS: Blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
@@ -62,6 +63,9 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Serve static files for uploaded images
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Root route
 app.get('/', (req, res) => {
@@ -108,8 +112,10 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-httpServer.listen(PORT, () => {
+// Listen on all interfaces (0.0.0.0) to allow network access
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌐 Accessible on all network interfaces (0.0.0.0:${PORT})`);
   console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 

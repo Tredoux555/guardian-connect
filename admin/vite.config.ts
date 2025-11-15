@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3002,
+    host: true, // Allow access from network (iPhone, other devices)
   },
 })
 

@@ -5,7 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3003,
-    host: true, // Allow access from network (phone, other devices)
+    host: '0.0.0.0', // Explicitly bind to all interfaces (IPv4 and IPv6) for network access
+    strictPort: false,
   },
 })
 
