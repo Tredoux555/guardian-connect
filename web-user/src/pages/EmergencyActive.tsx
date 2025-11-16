@@ -186,10 +186,12 @@ function EmergencyActive() {
 
   /**
    * Load emergency data with comprehensive error handling and retry logic
+   * Uses exponential backoff following Google Maps Platform best practices
    */
   const loadEmergency = async (retryCount = 0): Promise<void> => {
     const MAX_RETRIES = 3
-    const RETRY_DELAY = 2000
+    const INITIAL_DELAY = 100  // Start with 100ms (following Google's recommendation)
+    const MAX_DELAY = 5000     // Cap at 5 seconds (following Google's recommendation)
     
     try {
       setError(null)
@@ -289,22 +291,24 @@ function EmergencyActive() {
         setTimeout(() => navigate('/login'), 2000)
         return
       } else if (err.response?.status >= 500) {
-        // Server error - retry silently (don't show error during retries)
+        // Server error - retry with exponential backoff (following Google Maps Platform best practices)
         if (retryCount < MAX_RETRIES) {
-          // Log to console but don't update UI during retries
-          console.log(`Server error. Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
-          setTimeout(() => loadEmergency(retryCount + 1), RETRY_DELAY * (retryCount + 1))
+          // Exponential backoff: delay doubles each retry (100ms, 200ms, 400ms, capped at 5000ms)
+          const delay = Math.min(INITIAL_DELAY * Math.pow(2, retryCount), MAX_DELAY)
+          console.log(`Server error. Retrying in ${delay}ms... (${retryCount + 1}/${MAX_RETRIES})`)
+          setTimeout(() => loadEmergency(retryCount + 1), delay)
           return
         } else {
           // Only show error after all retries have failed
           setError('Server error. Please try again later.')
         }
       } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        // Network timeout - retry silently (don't show error during retries)
+        // Network timeout - retry with exponential backoff (following Google Maps Platform best practices)
         if (retryCount < MAX_RETRIES) {
-          // Log to console but don't update UI during retries
-          console.log(`Connection timeout. Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
-          setTimeout(() => loadEmergency(retryCount + 1), RETRY_DELAY * (retryCount + 1))
+          // Exponential backoff: delay doubles each retry (100ms, 200ms, 400ms, capped at 5000ms)
+          const delay = Math.min(INITIAL_DELAY * Math.pow(2, retryCount), MAX_DELAY)
+          console.log(`Connection timeout. Retrying in ${delay}ms... (${retryCount + 1}/${MAX_RETRIES})`)
+          setTimeout(() => loadEmergency(retryCount + 1), delay)
           return
         } else {
           // Only show error after all retries have failed
@@ -474,22 +478,27 @@ function EmergencyActive() {
       
       // If locations are identical or extremely close (< 0.0001 degrees ≈ 11 meters), just show destination
       if (distance < 0.0001) {
-        return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+        const encodedDest = encodeURIComponent(destCoords)
+        return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
       }
       
       // Use the most reliable format for directions with exact coordinates
       // Key elements:
       // 1. Use coordinates directly (not place_id) to avoid geocoding to districts
       // 2. Use 'dir_action=navigate' to force navigation mode
-      // 3. Don't encode coordinates - Google Maps handles unencoded coordinates better
+      // 3. URL-encode coordinates for safety (following Google Maps Platform best practices)
+      //    Note: Numeric coordinates are safe unencoded, but encoding is defensive
       // This format forces Google Maps to treat them as GPS coordinates, not addresses
-      return `https://www.google.com/maps/dir/?api=1&origin=${originCoords}&destination=${destCoords}&travelmode=driving&dir_action=navigate`
+      const encodedOrigin = encodeURIComponent(originCoords)
+      const encodedDest = encodeURIComponent(destCoords)
+      return `https://www.google.com/maps/dir/?api=1&origin=${encodedOrigin}&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
       
     } catch (error) {
       console.error('Error generating Google Maps URL:', error)
-      // Fallback to destination only
+      // Fallback to destination only (with URL encoding)
       const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
-      return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+      const encodedDest = encodeURIComponent(destCoords)
+      return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
     }
   }
 

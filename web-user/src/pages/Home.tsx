@@ -7,6 +7,7 @@ import {
   requestEmergencyLocation,
   wakeScreen 
 } from '../services/notifications'
+import { FEATURES } from '../utils/featureFlags'
 import './Home.css'
 
 function Home() {
@@ -246,6 +247,12 @@ function Home() {
         <h1>Guardian Connect</h1>
         <div className="header-actions">
           <button onClick={() => navigate('/contacts')}>Contacts</button>
+          {FEATURES.donations && (
+            <button onClick={() => navigate('/donations')}>Donate</button>
+          )}
+          {FEATURES.subscriptions && (
+            <button onClick={() => navigate('/subscriptions')}>Subscribe</button>
+          )}
           <button onClick={handleLogout}>Logout</button>
         </div>
       </header>

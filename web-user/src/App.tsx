@@ -5,6 +5,9 @@ import Home from './pages/Home'
 import EmergencyActive from './pages/EmergencyActive'
 import EmergencyResponse from './pages/EmergencyResponse'
 import Contacts from './pages/Contacts'
+import Donations from './pages/Donations'
+import Subscriptions from './pages/Subscriptions'
+import { FEATURES } from './utils/featureFlags'
 import { registerServiceWorker, requestNotificationPermission, subscribeToPushNotifications } from './services/notifications'
 import './App.css'
 
@@ -47,6 +50,8 @@ function App() {
         <Route path="/emergency/:id" element={<ProtectedRoute><EmergencyActive /></ProtectedRoute>} />
         <Route path="/respond/:id" element={<ProtectedRoute><EmergencyResponse /></ProtectedRoute>} />
         <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
+        {FEATURES.donations && <Route path="/donations" element={<ProtectedRoute><Donations /></ProtectedRoute>} />}
+        {FEATURES.subscriptions && <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />}
       </Routes>
     </Router>
   )
