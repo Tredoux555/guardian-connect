@@ -30,7 +30,8 @@
     "socket.io": "^4.6.1",
     "stripe": "^14.7.0",
     "twilio": "^4.19.0",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",

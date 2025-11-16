@@ -42,6 +42,12 @@ export const initializeSocket = (httpServer: HTTPServer) => {
     const userId = (socket as any).userId;
     console.log(`User ${userId} connected to Socket.io`);
 
+    // Join user-specific room for direct messaging
+    if (userId) {
+      socket.join(`user:${userId}`);
+      console.log(`User ${userId} joined their user room`);
+    }
+
     // Join emergency room
     socket.on('join_emergency', (emergencyId: string) => {
       socket.join(`emergency:${emergencyId}`);
@@ -68,6 +74,15 @@ export const emitToEmergency = (
   data: any
 ) => {
   io.to(`emergency:${emergencyId}`).emit(event, data);
+};
+
+// Emit to a specific user by userId
+export const emitToUser = (
+  userId: string,
+  event: string,
+  data: any
+) => {
+  io.to(`user:${userId}`).emit(event, data);
 };
 
 

@@ -773,11 +773,11 @@ function EmergencyActive() {
       return (
         <div style={{ 
           padding: '1rem', 
-          backgroundColor: '#fff3cd', 
+          backgroundColor: '#D4E8F5', /* Lighter medium baby blue - replaces yellow */
           borderRadius: '8px', 
           margin: '1rem 0',
           textAlign: 'center',
-          color: '#856404'
+          color: '#4A6FA5' /* Darker blue text for contrast */
         }}>
           <p style={{ margin: 0 }}>⏳ Waiting for emergency location data...</p>
         </div>
@@ -789,7 +789,7 @@ function EmergencyActive() {
       return (
         <div style={{ 
           padding: '1rem', 
-          backgroundColor: '#e3f2fd', 
+          backgroundColor: '#C5E1F5', /* Medium baby blue - replaces light blue */
           borderRadius: '8px', 
           margin: '1rem 0',
           textAlign: 'center'
@@ -822,7 +822,7 @@ function EmergencyActive() {
       <div>
         <div className="maps-link-container" style={{ 
           padding: '1rem', 
-          backgroundColor: '#f5f5f5', 
+          backgroundColor: '#C5E1F5', /* Medium baby blue - replaces grey */
           borderRadius: '8px', 
           margin: '1rem 0',
           textAlign: 'center'
@@ -843,7 +843,7 @@ function EmergencyActive() {
                 display: 'inline-block', 
                 padding: '1rem 2rem',
                 backgroundColor: '#4285F4',
-                color: 'white',
+                color: '#F5FAFF', /* Lightest baby blue - replaces white text */
                 textDecoration: 'none',
                 borderRadius: '8px',
                 fontSize: '1.1rem',
@@ -858,17 +858,17 @@ function EmergencyActive() {
           <div style={{ 
             margin: '1rem 0',
             padding: '0.5rem',
-            backgroundColor: '#f9f9f9',
+            backgroundColor: '#D4E8F5', /* Lighter medium baby blue - replaces lighter grey */
             borderRadius: '4px',
-            border: '1px solid #ddd'
+            border: '1px solid #B3D9FF' /* Darker baby blue border */
           }}>
             <button
               onClick={() => setShowDiagnostics(!showDiagnostics)}
               style={{
                 width: '100%',
                 padding: '0.5rem',
-                backgroundColor: '#6c757d',
-                color: 'white',
+                backgroundColor: '#9CC5E8', /* Darker baby blue - replaces grey button */
+                color: '#F5FAFF', /* Lightest baby blue - replaces white text */
                 border: 'none',
                 borderRadius: '4px',
                 cursor: 'pointer',
@@ -882,7 +882,7 @@ function EmergencyActive() {
               <div style={{
                 marginTop: '1rem',
                 padding: '1rem',
-                backgroundColor: 'white',
+                backgroundColor: '#E6F2FF', /* Soft baby blue - replaces white */
                 borderRadius: '4px',
                 fontSize: '0.85rem',
                 fontFamily: 'monospace',
@@ -978,7 +978,7 @@ function EmergencyActive() {
                   <strong>Alternative URL Formats (for testing):</strong>
                   <div style={{ paddingLeft: '1rem' }}>
                     {diagnostics.urlFormats.map((format: any, idx: number) => (
-                      <div key={idx} style={{ marginBottom: '0.5rem', padding: '0.5rem', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
+                      <div key={idx} style={{ marginBottom: '0.5rem', padding: '0.5rem', backgroundColor: '#C5E1F5', /* Medium baby blue - replaces grey */ borderRadius: '4px' }}>
                         <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{format.name}:</div>
                         <a 
                           href={format.url} 
@@ -993,7 +993,7 @@ function EmergencyActive() {
                   </div>
                 </div>
                 
-                <div style={{ marginTop: '1rem', padding: '0.5rem', backgroundColor: '#fff3cd', borderRadius: '4px', fontSize: '0.8rem' }}>
+                <div style={{ marginTop: '1rem', padding: '0.5rem', backgroundColor: '#D4E8F5', /* Lighter medium baby blue - replaces yellow */ borderRadius: '4px', fontSize: '0.8rem' }}>
                   <strong>Note:</strong> Check console for full diagnostic object. Compare coordinates above with what Google Maps shows.
                 </div>
               </div>
@@ -1135,7 +1135,7 @@ function EmergencyActive() {
                       onClick={() => setSelectedLocation(location)}
                       label={isSenderLocation ? {
                         text: '🚨',
-                        color: '#FFFFFF',
+                        color: '#F5FAFF', /* Lightest baby blue - replaces white */
                         fontSize: '16px',
                         fontWeight: 'bold'
                       } : undefined}
@@ -1206,7 +1206,7 @@ function EmergencyActive() {
               <div style={{ 
                 padding: '2rem', 
                 textAlign: 'center',
-                backgroundColor: '#f5f5f5',
+                backgroundColor: '#C5E1F5', /* Medium baby blue - replaces grey */
                 borderRadius: '8px',
                 margin: '1rem 0'
               }}>
@@ -1223,7 +1223,7 @@ function EmergencyActive() {
             <div className="map-placeholder" style={{
               padding: '2rem',
               textAlign: 'center',
-              backgroundColor: '#f5f5f5',
+              backgroundColor: '#C5E1F5', /* Medium baby blue - replaces grey */
               borderRadius: '8px',
               margin: '1rem 0'
             }}>
@@ -1244,11 +1244,11 @@ function EmergencyActive() {
           {error && (
             <div style={{
               padding: '1rem',
-              backgroundColor: '#fff3cd',
-              border: '1px solid #ffc107',
+              backgroundColor: '#D4E8F5', /* Lighter medium baby blue - replaces yellow */
+              border: '1px solid #B3D9FF', /* Darker baby blue border */
               borderRadius: '8px',
               margin: '1rem 0',
-              color: '#856404'
+              color: '#4A6FA5' /* Darker blue text for contrast */
             }}>
               <strong>⚠️ Warning:</strong> {error}
             </div>

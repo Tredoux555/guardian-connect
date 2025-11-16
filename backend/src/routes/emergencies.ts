@@ -3,7 +3,8 @@ import { body, validationResult } from 'express-validator';
 import { Emergency } from '../models/Emergency';
 import { query } from '../database/db';
 import { sendEmergencyAlert } from '../services/push';
-import { emitToEmergency } from '../services/socket';
+import { sendEmergencyWebPush } from '../services/webPush';
+import { emitToEmergency, emitToUser } from '../services/socket';
 import { AuthRequest, authenticate } from '../middleware/auth';
 import messageRoutes from './messages';
 
@@ -53,34 +54,49 @@ router.post(
         (p: any) => p !== null
       );
 
-      // Send push notifications to all registered contacts
+      // Get sender email for notifications
       const userResult = await query(
         'SELECT email FROM users WHERE id = $1',
         [userId]
       );
-      const userName = userResult.rows[0]?.email || 'Someone';
+      const senderEmail = userResult.rows[0]?.email || 'Someone';
 
+      // Send notifications to all registered contacts
       for (const participant of participants) {
-        if (participant) {
+        if (participant && participant.userId) {
+          // Send Firebase push notification (for mobile apps)
           try {
             await sendEmergencyAlert(
               participant.userId,
               emergency.id,
-              userName,
+              senderEmail,
               undefined // Location will be sent when user accepts
             );
           } catch (error) {
-            console.error(`Failed to send alert to ${participant.userId}:`, error);
+            console.error(`Failed to send Firebase alert to ${participant.userId}:`, error);
           }
+
+          // Send Web Push notification (for web browsers - works even when app is closed)
+          try {
+            await sendEmergencyWebPush(
+              participant.userId,
+              emergency.id,
+              senderEmail
+            );
+          } catch (error) {
+            console.error(`Failed to send web push to ${participant.userId}:`, error);
+          }
+
+          // Emit socket event (for real-time updates when app is open)
+          emitToUser(participant.userId, 'emergency_created', {
+            emergencyId: emergency.id,
+            userId,
+            userEmail: senderEmail,
+            senderName: senderEmail,
+            participants: participants.length,
+          });
         }
       }
-
-      // Emit socket event
-      emitToEmergency(emergency.id, 'emergency_created', {
-        emergencyId: emergency.id,
-        userId,
-        participants: participants.length,
-      });
 
       res.status(201).json({
         emergency: {

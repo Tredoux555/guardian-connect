@@ -8,6 +8,7 @@ import authRoutes from './routes/auth';
 import emergencyRoutes from './routes/emergencies';
 import contactRoutes from './routes/contacts';
 import adminRoutes from './routes/admin';
+import notificationRoutes from './routes/notifications';
 import { initializeSocket } from './services/socket';
 import { authenticate } from './middleware/auth';
 
@@ -93,6 +94,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/emergencies', emergencyRoutes);
 app.use('/api/contacts', contactRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Protected routes
 app.get('/api/user/me', authenticate, (req, res) => {

@@ -1,9 +1,11 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import Login from './pages/Login'
 import Home from './pages/Home'
 import EmergencyActive from './pages/EmergencyActive'
 import EmergencyResponse from './pages/EmergencyResponse'
 import Contacts from './pages/Contacts'
+import { registerServiceWorker, requestNotificationPermission, subscribeToPushNotifications } from './services/notifications'
 import './App.css'
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -12,6 +14,26 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 }
 
 function App() {
+  // Register service worker and request notification permission on app load
+  useEffect(() => {
+    const initializeNotifications = async () => {
+      // Register service worker
+      await registerServiceWorker()
+      
+      // Request notification permission and subscribe to push (only if user is logged in)
+      const token = localStorage.getItem('access_token')
+      if (token) {
+        const permissionGranted = await requestNotificationPermission()
+        if (permissionGranted) {
+          // Subscribe to push notifications for background alerts
+          await subscribeToPushNotifications()
+        }
+      }
+    }
+
+    initializeNotifications()
+  }, [])
+
   return (
     <Router
       future={{

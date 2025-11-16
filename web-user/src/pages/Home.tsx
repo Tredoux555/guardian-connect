@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { connectSocket } from '../services/socket'
+import { 
+  showEmergencyNotification, 
+  requestEmergencyLocation,
+  wakeScreen 
+} from '../services/notifications'
 import './Home.css'
 
 function Home() {
@@ -62,6 +68,98 @@ function Home() {
       checkPendingEmergencies()
     }, 5000) // Check every 5 seconds
     return () => clearInterval(interval)
+  }, [])
+
+  // Listen for emergency_created socket events
+  useEffect(() => {
+    const token = localStorage.getItem('access_token')
+    if (!token) return
+
+    const socket = connectSocket(token)
+    
+    const handleEmergencyCreated = async (data: any) => {
+      console.log('🚨 Emergency created event received:', data)
+      
+      const emergencyId = data.emergencyId
+      const senderName = data.userEmail || 'Someone'
+      
+      // Show loud notification with sound
+      await showEmergencyNotification(
+        '🚨 Emergency Alert',
+        `${senderName} needs help!`,
+        emergencyId,
+        senderName
+      )
+      
+      // Wake screen
+      await wakeScreen()
+      
+      // Request location immediately (even if app is in background)
+      const position = await requestEmergencyLocation()
+      
+      if (position && emergencyId) {
+        // Share location with emergency
+        try {
+          await api.post(`/emergencies/${emergencyId}/location`, {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          })
+          console.log('✅ Location shared automatically on emergency receive')
+        } catch (err) {
+          console.error('Failed to share location on emergency receive:', err)
+        }
+      }
+      
+      // Navigate to emergency response page
+      navigate(`/respond/${emergencyId}`)
+    }
+
+    // Wait for socket to connect, then listen
+    if (socket.connected) {
+      socket.on('emergency_created', handleEmergencyCreated)
+    } else {
+      socket.once('connect', () => {
+        socket.on('emergency_created', handleEmergencyCreated)
+      })
+    }
+
+    return () => {
+      if (socket) {
+        socket.off('emergency_created', handleEmergencyCreated)
+      }
+    }
+  }, [navigate])
+
+  // Listen for service worker messages (for background notifications)
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      const handleMessage = async (event: MessageEvent) => {
+        if (event.data && event.data.type === 'EMERGENCY_RECEIVED') {
+          const { emergencyId } = event.data
+          
+          // Request location when service worker receives emergency
+          const position = await requestEmergencyLocation()
+          
+          if (position && emergencyId) {
+            try {
+              await api.post(`/emergencies/${emergencyId}/location`, {
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+              })
+              console.log('✅ Location shared from service worker')
+            } catch (err) {
+              console.error('Failed to share location from service worker:', err)
+            }
+          }
+        }
+      }
+
+      navigator.serviceWorker.addEventListener('message', handleMessage)
+
+      return () => {
+        navigator.serviceWorker.removeEventListener('message', handleMessage)
+      }
+    }
   }, [])
 
   const handleLogout = () => {
