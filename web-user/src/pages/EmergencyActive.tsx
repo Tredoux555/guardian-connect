@@ -42,6 +42,7 @@ interface Location {
   longitude: number
   timestamp: string
   user_email?: string
+  user_display_name?: string
 }
 
 function EmergencyActive() {
@@ -1192,7 +1193,7 @@ function EmergencyActive() {
                                   : '📍 Responder Location'}
                               </strong>
                               <br />
-                              <small>{location.user_email || 'Location'}</small>
+                              <small>{location.user_display_name || location.user_email || 'Location'}</small>
                               {distanceText && (
                                 <>
                                   <br />
@@ -1286,7 +1287,7 @@ function EmergencyActive() {
             <h3>✅ Responding ({acceptedParticipants.length})</h3>
             {acceptedParticipants.map((p: any) => (
               <div key={p.id} className="participant accepted">
-                {p.user_email || 'Responder'} - Responding
+                {p.user_display_name || p.user_email || 'Responder'} - Responding
               </div>
             ))}
           </div>
@@ -1297,7 +1298,7 @@ function EmergencyActive() {
             <h3>⏳ Deciding... ({pendingParticipants.length})</h3>
             {pendingParticipants.map((p: any) => (
               <div key={p.id} className="participant pending">
-                {p.user_email || 'Contact'} - Waiting for response
+                {p.user_display_name || p.user_email || 'Contact'} - Waiting for response
               </div>
             ))}
           </div>
@@ -1308,7 +1309,7 @@ function EmergencyActive() {
             <h3>❌ Unavailable ({rejectedParticipants.length})</h3>
             {rejectedParticipants.map((p: any) => (
               <div key={p.id} className="participant rejected">
-                {p.user_email || 'Contact'} - Unavailable
+                {p.user_display_name || p.user_email || 'Contact'} - Unavailable
               </div>
             ))}
           </div>

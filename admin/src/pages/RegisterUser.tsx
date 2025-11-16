@@ -4,6 +4,7 @@ import './RegisterUser.css'
 function RegisterUser() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [displayName, setDisplayName] = useState('')
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
@@ -16,12 +17,17 @@ function RegisterUser() {
 
     try {
       // Registration is a public endpoint, so we need to call it without the admin token
+      const requestBody: any = { email, password }
+      if (displayName.trim()) {
+        requestBody.display_name = displayName.trim()
+      }
+      
       const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(requestBody),
       })
       
       const data = await response.json()
@@ -46,9 +52,10 @@ function RegisterUser() {
         throw new Error(errorMessage)
       }
       
-      setSuccess(`User registered successfully! Email: ${email}. Remember to verify them in the Users page.`)
+      setSuccess(`User registered successfully! Email: ${email}${displayName ? `, Display Name: ${displayName}` : ''}. Remember to verify them in the Users page.`)
       setEmail('')
       setPassword('')
+      setDisplayName('')
     } catch (err: any) {
       setError(err.message || 'Registration failed. Please check your input and try again.')
     } finally {
@@ -82,6 +89,21 @@ function RegisterUser() {
             minLength={8}
             required
           />
+        </div>
+
+        <div className="form-group">
+          <label>Display Name (optional):</label>
+          <input
+            type="text"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="JohnSmith (letters and numbers only, 1-50 chars)"
+            pattern="[a-zA-Z0-9]+"
+            maxLength={50}
+          />
+          <small style={{ color: '#666', fontSize: '0.9em' }}>
+            This name will appear in emergency alerts instead of email
+          </small>
         </div>
 
         {error && <div className="error-message">{error}</div>}

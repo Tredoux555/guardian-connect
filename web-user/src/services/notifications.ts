@@ -3,6 +3,12 @@
  * Handles browser notifications, sounds, screen wake, and location access
  */
 
+// Global sound state for continuous emergency tone
+let emergencySoundContext: AudioContext | null = null;
+let emergencySoundOscillator: OscillatorNode | null = null;
+let emergencySoundGain: GainNode | null = null;
+let emergencySoundAudio: HTMLAudioElement | null = null;
+
 // Request notification permission
 export const requestNotificationPermission = async (): Promise<boolean> => {
   if (!('Notification' in window)) {
@@ -76,20 +82,25 @@ export const showEmergencyNotification = async (
     icon: '/icon-192x192.png',
     badge: '/icon-192x192.png',
     tag: `emergency-${emergencyId}`, // Replace previous notifications
-    requireInteraction: true, // Keep visible until user interacts
-    silent: false, // Enable sound
-    vibrate: [200, 100, 200, 100, 200, 100, 200], // Strong vibration pattern
+    requireInteraction: true, // Keep visible until user interacts - CRITICAL for emergency
+    silent: false, // CRITICAL: Enable sound - nothing is more important
+    vibrate: [200, 100, 200, 100, 200, 100, 200, 100, 200], // Stronger vibration pattern
+    renotify: true, // Re-notify even if notification exists
     data: {
       emergencyId: emergencyId,
-      url: `/emergency/${emergencyId}`,
+      url: `/respond/${emergencyId}`, // Direct to response page
       type: 'emergency',
       senderName: senderName
     },
     actions: [
       {
         action: 'respond',
-        title: 'Respond to Emergency',
+        title: 'I CAN HELP',
         icon: '/icon-respond.png'
+      },
+      {
+        action: 'dismiss',
+        title: 'UNAVAILABLE'
       }
     ]
   };
@@ -111,54 +122,95 @@ export const showEmergencyNotification = async (
   }
 };
 
-// Play loud emergency sound
+// Play continuous loud emergency sound - plays until stopped
 export const playEmergencySound = (): void => {
   try {
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    // Stop any existing emergency sound first
+    stopEmergencySound();
     
-    // Generate loud, attention-grabbing tone
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
+    // Create new audio context for continuous tone
+    emergencySoundContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    // Generate continuous, loud, attention-grabbing tone
+    emergencySoundOscillator = emergencySoundContext.createOscillator();
+    emergencySoundGain = emergencySoundContext.createGain();
     
-    // Configure for loud, urgent sound
-    oscillator.frequency.value = 800; // High frequency
-    oscillator.type = 'sine';
+    emergencySoundOscillator.connect(emergencySoundGain);
+    emergencySoundGain.connect(emergencySoundContext.destination);
     
-    // Set volume (browsers limit to ~0.5 for safety)
-    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+    // Configure for loud, urgent, continuous sound
+    emergencySoundOscillator.frequency.value = 1000; // Higher frequency for more urgency
+    emergencySoundOscillator.type = 'sine';
     
-    // Play pattern: beep-beep-beep (3 beeps)
-    oscillator.start();
+    // Set volume to maximum allowed (browsers limit to ~0.5 for safety, but we try higher)
+    emergencySoundGain.gain.setValueAtTime(0.8, emergencySoundContext.currentTime);
     
-    // First beep
-    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
-    gainNode.gain.setValueAtTime(0, audioContext.currentTime + 0.2);
+    // Start the continuous tone - it will play until stop() is called
+    emergencySoundOscillator.start();
     
-    // Second beep
-    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime + 0.3);
-    gainNode.gain.setValueAtTime(0, audioContext.currentTime + 0.5);
-    
-    // Third beep
-    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime + 0.6);
-    gainNode.gain.setValueAtTime(0, audioContext.currentTime + 0.8);
-    
-    oscillator.stop(audioContext.currentTime + 0.9);
-    
-    // Also try to play sound file if available
+    // Also try to play a sound file in a continuous loop if available
     try {
-      const audio = new Audio('/emergency-alert.mp3');
-      audio.volume = 0.7; // Loud but safe
-      audio.play().catch((err) => {
-        console.log('Sound file not available, using generated tone');
+      emergencySoundAudio = new Audio('/emergency-alert.mp3');
+      emergencySoundAudio.volume = 1.0; // Maximum volume
+      emergencySoundAudio.loop = true; // Loop continuously
+      emergencySoundAudio.play().catch((err) => {
+        console.log('Sound file not available, using generated continuous tone');
       });
     } catch (err) {
       // Sound file not available, generated tone is playing
     }
   } catch (error) {
     console.error('Error playing emergency sound:', error);
+  }
+};
+
+// Stop the continuous emergency sound - called when user responds
+export const stopEmergencySound = (): void => {
+  try {
+    // Stop the oscillator
+    if (emergencySoundOscillator) {
+      try {
+        emergencySoundOscillator.stop();
+      } catch (e) {
+        // Already stopped or context closed
+      }
+      emergencySoundOscillator = null;
+    }
+    
+    // Close the audio context
+    if (emergencySoundContext) {
+      emergencySoundContext.close().catch(() => {
+        // Ignore errors when closing
+      });
+      emergencySoundContext = null;
+    }
+    
+    emergencySoundGain = null;
+    
+    // Stop any audio file that might be playing
+    if (emergencySoundAudio) {
+      emergencySoundAudio.pause();
+      emergencySoundAudio.currentTime = 0;
+      emergencySoundAudio.loop = false;
+      emergencySoundAudio = null;
+    }
+    
+    // Also stop any other audio elements that might be playing
+    const audioElements = document.querySelectorAll('audio[src="/emergency-alert.mp3"]');
+    audioElements.forEach((audio: any) => {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.loop = false;
+    });
+    
+    // Send message to service worker to stop sound there too
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'STOP_EMERGENCY_SOUND'
+      });
+    }
+  } catch (error) {
+    console.error('Error stopping emergency sound:', error);
   }
 };
 

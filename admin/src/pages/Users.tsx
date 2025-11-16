@@ -5,6 +5,7 @@ import './Users.css'
 interface User {
   id: string
   email: string
+  display_name?: string
   verified: boolean
   created_at: string
   contacts?: Contact[]
@@ -132,6 +133,7 @@ function Users() {
       <table className="users-table">
         <thead>
           <tr>
+            <th>Display Name</th>
             <th>Email</th>
             <th>Verified</th>
             <th>Created</th>
@@ -141,7 +143,8 @@ function Users() {
         <tbody>
           {filteredUsers.map((user) => (
             <tr key={user.id}>
-              <td>{user.email}</td>
+              <td>{user.display_name || user.email}</td>
+              <td style={{ fontSize: '0.9em', color: '#666' }}>{user.email}</td>
               <td>{user.verified ? 'Yes' : 'No'}</td>
               <td>{new Date(user.created_at).toLocaleDateString()}</td>
               <td>

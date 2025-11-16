@@ -18,15 +18,22 @@ function Dashboard() {
 
   const loadStats = async () => {
     try {
-      const response = await api.get('/admin/analytics')
+      const response = await api.get('/admin/analytics', { timeout: 5000 })
       setStats(response.data)
     } catch (err: any) {
       console.error('Failed to load stats:', err)
-      if (err.response?.status === 401) {
+      if (err.response?.status === 401 || err.response?.status === 403) {
         // Token expired or invalid - redirect to login
         localStorage.removeItem('admin_token')
         window.location.href = '/login'
+        return
       }
+      // If analytics fails (timeout, network error, etc.), set default stats and continue
+      setStats({
+        totalUsers: 0,
+        activeEmergencies: 0,
+        responseRate: 0,
+      })
     } finally {
       setLoading(false)
     }

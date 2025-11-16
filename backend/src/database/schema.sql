@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    display_name VARCHAR(50),
     verified BOOLEAN DEFAULT FALSE,
     fcm_token VARCHAR(500),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

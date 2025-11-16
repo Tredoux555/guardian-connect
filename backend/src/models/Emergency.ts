@@ -84,7 +84,8 @@ export class Emergency {
   static async getParticipants(emergencyId: string): Promise<any[]> {
     const result = await query(
       `SELECT ep.id, ep.emergency_id, ep.user_id, ep.status, ep.joined_at, ep.created_at,
-              u.email as user_email
+              u.email as user_email,
+              COALESCE(u.display_name, u.email) as user_display_name
        FROM emergency_participants ep
        LEFT JOIN users u ON ep.user_id = u.id
        WHERE ep.emergency_id = $1
@@ -111,7 +112,8 @@ export class Emergency {
     const result = await query(
       `SELECT DISTINCT ON (el.user_id) 
        el.id, el.emergency_id, el.user_id, el.latitude, el.longitude, el.timestamp,
-       u.email as user_email
+       u.email as user_email,
+       COALESCE(u.display_name, u.email) as user_display_name
        FROM emergency_locations el
        LEFT JOIN users u ON el.user_id = u.id
        WHERE el.emergency_id = $1

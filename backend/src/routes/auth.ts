@@ -6,7 +6,7 @@ import { generateTokens, createSession, deleteSession, verifyToken } from '../se
 import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email';
 import { query } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, authenticate } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -29,6 +29,7 @@ router.post(
   [
     body('email').isEmail().normalizeEmail(),
     body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+    body('display_name').optional().isString().trim().isLength({ min: 1, max: 50 }).withMessage('Display name must be between 1 and 50 characters').matches(/^[a-zA-Z0-9]+$/).withMessage('Display name can only contain letters and numbers'),
   ],
   async (req: Request, res: Response) => {
     try {
@@ -36,7 +37,7 @@ router.post(
       if (!errors.isEmpty()) {
         const errorMessages = errors.array().map((err: any) => {
           if (err.type === 'field') {
-            const field = err.path === 'email' ? 'Email' : 'Password';
+            const field = err.path === 'email' ? 'Email' : err.path === 'password' ? 'Password' : 'Display Name';
             return `${field}: ${err.msg}`;
           }
           return err.msg;
@@ -47,7 +48,7 @@ router.post(
         });
       }
 
-      const { email, password } = req.body;
+      const { email, password, display_name } = req.body;
 
       // Check if user exists
       const existingUser = await User.findByEmail(email);
@@ -56,7 +57,7 @@ router.post(
       }
 
       // Create user
-      const user = await User.create(email, password);
+      const user = await User.create(email, password, display_name);
 
       // Generate verification token
       const verificationToken = uuidv4();
@@ -78,6 +79,7 @@ router.post(
         user: {
           id: user.id,
           email: user.email,
+          display_name: user.display_name,
           verified: user.verified,
         },
       });
@@ -300,6 +302,43 @@ router.post('/logout', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Logout failed' });
   }
 });
+
+// Update display name
+router.post(
+  '/update-display-name',
+  authenticate,
+  [
+    body('display_name').isString().trim().isLength({ min: 1, max: 50 }).withMessage('Display name must be between 1 and 50 characters').matches(/^[a-zA-Z0-9]+$/).withMessage('Display name can only contain letters and numbers'),
+  ],
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const userId = req.userId!;
+      const { display_name } = req.body;
+
+      await User.updateDisplayName(userId, display_name);
+
+      // Get updated user
+      const user = await User.findById(userId);
+
+      res.json({
+        message: 'Display name updated successfully',
+        user: {
+          id: user?.id,
+          email: user?.email,
+          display_name: user?.display_name,
+        },
+      });
+    } catch (error) {
+      console.error('Update display name error:', error);
+      res.status(500).json({ error: 'Failed to update display name' });
+    }
+  }
+);
 
 export default router;
 

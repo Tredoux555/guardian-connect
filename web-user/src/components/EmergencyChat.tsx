@@ -15,6 +15,7 @@ interface Message {
   emergency_id: string
   user_id: string
   user_email: string
+  user_display_name?: string
   message: string | null
   image_url: string | null
   audio_url: string | null
@@ -125,6 +126,7 @@ export const EmergencyChat = ({ emergencyId }: EmergencyChatProps) => {
             emergency_id: data.emergencyId,
             user_id: data.userId,
             user_email: data.user_email,
+            user_display_name: data.user_display_name,
             message: data.message,
             image_url: data.image_url,
             audio_url: data.audio_url || null,
@@ -648,6 +650,7 @@ export const EmergencyChat = ({ emergencyId }: EmergencyChatProps) => {
         emergency_id: sentMessage.emergency_id || emergencyId,
         user_id: sentMessage.user_id,
         user_email: sentMessage.user_email || getCurrentUserEmail() || 'You',
+        user_display_name: sentMessage.user_display_name,
         message: sentMessage.message,
         image_url: sentMessage.image_url,
         audio_url: sentMessage.audio_url,
@@ -754,7 +757,7 @@ export const EmergencyChat = ({ emergencyId }: EmergencyChatProps) => {
               >
                 <div className="message-content">
                   {!isOwnMessage && (
-                    <div className="message-sender">{message.user_email}</div>
+                    <div className="message-sender">{message.user_display_name || message.user_email}</div>
                   )}
                   {message.message && (
                     <div className="message-text">{message.message}</div>

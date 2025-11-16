@@ -2,7 +2,11 @@
 // Handles background notifications, sounds, and location access
 
 const EMERGENCY_SOUND_URL = '/emergency-alert.mp3';
-let emergencySound = null;
+// Store sound references globally in service worker for continuous playback
+let emergencySoundContext = null;
+let emergencySoundOscillator = null;
+let emergencySoundGain = null;
+let emergencySoundSource = null;
 
 // Install service worker
 self.addEventListener('install', (event) => {
@@ -79,29 +83,33 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   console.log('🔔 Notification clicked:', event);
   
+  // STOP THE SOUND immediately when user interacts with notification
+  stopEmergencySound();
+  
   event.notification.close();
   
   const data = event.notification.data;
   const action = event.action;
   
   if (action === 'dismiss') {
+    // User marked as unavailable - sound already stopped
     return;
   }
 
-  // Open or focus the emergency page
+  // Open or focus the emergency response page
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       // Check if emergency page is already open
-      const emergencyUrl = data.url || `/emergency/${data.emergencyId}`;
+      const emergencyUrl = data.url || `/respond/${data.emergencyId}`;
       
       for (let i = 0; i < clientList.length; i++) {
         const client = clientList[i];
-        if (client.url.includes('/emergency/') && 'focus' in client) {
+        if ((client.url.includes('/emergency/') || client.url.includes('/respond/')) && 'focus' in client) {
           return client.focus();
         }
       }
       
-      // Open new window
+      // Open new window to response page
       if (clients.openWindow) {
         return clients.openWindow(emergencyUrl);
       }
@@ -109,62 +117,86 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// Play loud emergency sound
+// Play continuous loud emergency sound - plays until stopped
 async function playEmergencySound() {
   try {
-    // Create audio context for loud sound
-    const audioContext = new (self.AudioContext || self.webkitAudioContext)();
+    // Stop any existing sound first
+    stopEmergencySound();
     
-    // Generate a loud, attention-grabbing tone
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
+    // Create audio context for continuous loud sound
+    emergencySoundContext = new (self.AudioContext || self.webkitAudioContext)();
     
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    // Generate a continuous, loud, attention-grabbing tone
+    emergencySoundOscillator = emergencySoundContext.createOscillator();
+    emergencySoundGain = emergencySoundContext.createGain();
     
-    // Configure for loud, urgent sound
-    oscillator.frequency.value = 800; // High frequency for attention
-    oscillator.type = 'sine';
+    emergencySoundOscillator.connect(emergencySoundGain);
+    emergencySoundGain.connect(emergencySoundContext.destination);
     
-    // Set volume to maximum (0.0 to 1.0, but browsers limit to ~0.5 for safety)
-    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+    // Configure for loud, urgent, continuous sound
+    emergencySoundOscillator.frequency.value = 1000; // Higher frequency for more urgency
+    emergencySoundOscillator.type = 'sine';
     
-    // Play pattern: beep-beep-beep (3 beeps)
-    oscillator.start();
+    // Set volume to maximum (browsers limit to ~0.5, but we try higher)
+    emergencySoundGain.gain.setValueAtTime(0.8, emergencySoundContext.currentTime);
     
-    // First beep
-    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
-    gainNode.gain.setValueAtTime(0, audioContext.currentTime + 0.2);
+    // Start continuous tone - it will play until stop() is called
+    emergencySoundOscillator.start();
     
-    // Second beep
-    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime + 0.3);
-    gainNode.gain.setValueAtTime(0, audioContext.currentTime + 0.5);
-    
-    // Third beep
-    gainNode.gain.setValueAtTime(0.5, audioContext.currentTime + 0.6);
-    gainNode.gain.setValueAtTime(0, audioContext.currentTime + 0.8);
-    
-    oscillator.stop(audioContext.currentTime + 0.9);
-    
-    // Also try to play a sound file if available
+    // Also try to play sound file in continuous loop if available
     try {
       const response = await fetch(EMERGENCY_SOUND_URL);
       if (response.ok) {
         const arrayBuffer = await response.arrayBuffer();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        const gain = audioContext.createGain();
-        gain.gain.value = 0.7; // Loud but safe
-        source.connect(gain);
-        gain.connect(audioContext.destination);
-        source.start();
+        const audioBuffer = await emergencySoundContext.decodeAudioData(arrayBuffer);
+        emergencySoundSource = emergencySoundContext.createBufferSource();
+        emergencySoundSource.buffer = audioBuffer;
+        emergencySoundSource.loop = true; // Loop continuously
+        const gain = emergencySoundContext.createGain();
+        gain.gain.value = 1.0; // Maximum volume
+        emergencySoundSource.connect(gain);
+        gain.connect(emergencySoundContext.destination);
+        emergencySoundSource.start();
       }
     } catch (err) {
-      console.log('Sound file not available, using generated tone');
+      console.log('Sound file not available, using generated continuous tone');
     }
   } catch (error) {
     console.error('Error playing emergency sound:', error);
+  }
+}
+
+// Stop emergency sound - called when user responds
+function stopEmergencySound() {
+  try {
+    if (emergencySoundOscillator) {
+      try {
+        emergencySoundOscillator.stop();
+      } catch (e) {
+        // Already stopped or context closed
+      }
+      emergencySoundOscillator = null;
+    }
+    
+    if (emergencySoundSource) {
+      try {
+        emergencySoundSource.stop();
+      } catch (e) {
+        // Already stopped
+      }
+      emergencySoundSource = null;
+    }
+    
+    if (emergencySoundContext) {
+      emergencySoundContext.close().catch(() => {
+        // Ignore errors when closing
+      });
+      emergencySoundContext = null;
+    }
+    
+    emergencySoundGain = null;
+  } catch (error) {
+    console.error('Error stopping emergency sound:', error);
   }
 }
 
@@ -189,6 +221,10 @@ async function requestLocationAccess(emergencyId) {
 // Handle messages from clients
 self.addEventListener('message', (event) => {
   console.log('🔔 Service Worker received message:', event.data);
+  
+  if (event.data && event.data.type === 'STOP_EMERGENCY_SOUND') {
+    stopEmergencySound();
+  }
   
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();

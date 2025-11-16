@@ -4,7 +4,6 @@ import api from '../services/api'
 import { connectSocket } from '../services/socket'
 import { 
   showEmergencyNotification, 
-  requestEmergencyLocation,
   wakeScreen 
 } from '../services/notifications'
 import { FEATURES } from '../utils/featureFlags'
@@ -12,6 +11,16 @@ import './Home.css'
 
 function Home() {
   const navigate = useNavigate()
+  
+  // Debug: Log feature flags (remove after testing)
+  useEffect(() => {
+    console.log('🔍 Feature Flags Status:', {
+      donations: FEATURES.donations,
+      subscriptions: FEATURES.subscriptions,
+      envDonations: import.meta.env.VITE_ENABLE_DONATIONS,
+      envSubscriptions: import.meta.env.VITE_ENABLE_SUBSCRIPTIONS,
+    })
+  }, [])
   const [activeEmergency, setActiveEmergency] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [user, setUser] = useState<any>(null)
@@ -82,7 +91,7 @@ function Home() {
       console.log('🚨 Emergency created event received:', data)
       
       const emergencyId = data.emergencyId
-      const senderName = data.userEmail || 'Someone'
+      const senderName = data.senderName || data.userEmail || 'Someone'
       
       // Show loud notification with sound
       await showEmergencyNotification(
@@ -95,21 +104,9 @@ function Home() {
       // Wake screen
       await wakeScreen()
       
-      // Request location immediately (even if app is in background)
-      const position = await requestEmergencyLocation()
-      
-      if (position && emergencyId) {
-        // Share location with emergency
-        try {
-          await api.post(`/emergencies/${emergencyId}/location`, {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          })
-          console.log('✅ Location shared automatically on emergency receive')
-        } catch (err) {
-          console.error('Failed to share location on emergency receive:', err)
-        }
-      }
+      // DON'T try to share location here - user must accept emergency first
+      // Location will be shared automatically when user clicks "I CAN HELP" 
+      // on the EmergencyResponse page (which already handles this correctly)
       
       // Navigate to emergency response page
       navigate(`/respond/${emergencyId}`)
@@ -247,9 +244,7 @@ function Home() {
         <h1>Guardian Connect</h1>
         <div className="header-actions">
           <button onClick={() => navigate('/contacts')}>Contacts</button>
-          {FEATURES.donations && (
-            <button onClick={() => navigate('/donations')}>Donate</button>
-          )}
+          {/* Donate button hidden */}
           {FEATURES.subscriptions && (
             <button onClick={() => navigate('/subscriptions')}>Subscribe</button>
           )}
@@ -263,7 +258,7 @@ function Home() {
             <h2>⚠️ Pending Emergency Alerts</h2>
             {pendingEmergencies.map((emergency: any) => (
               <div key={emergency.id} className="pending-emergency-card">
-                <p><strong>{emergency.sender_email}</strong> needs help!</p>
+                <p><strong>{emergency.sender_display_name || emergency.sender_email}</strong> needs help!</p>
                 <button onClick={() => navigate(`/respond/${emergency.id}`)}>
                   Respond Now
                 </button>

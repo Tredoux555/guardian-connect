@@ -59,7 +59,7 @@ router.post(
 router.get('/users', authenticate, requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const result = await query(
-      'SELECT id, email, verified, created_at FROM users ORDER BY created_at DESC LIMIT 1000',
+      'SELECT id, email, display_name, verified, created_at FROM users ORDER BY created_at DESC LIMIT 1000',
       []
     );
     res.json(result.rows);
@@ -76,7 +76,7 @@ router.get('/users/:userId', authenticate, requireAdmin, async (req: AuthRequest
     
     // Get user info
     const userResult = await query(
-      'SELECT id, email, verified, created_at FROM users WHERE id = $1',
+      'SELECT id, email, display_name, verified, created_at FROM users WHERE id = $1',
       [userId]
     );
     

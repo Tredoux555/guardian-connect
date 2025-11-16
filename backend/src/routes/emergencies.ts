@@ -6,6 +6,7 @@ import { sendEmergencyAlert } from '../services/push';
 import { sendEmergencyWebPush } from '../services/webPush';
 import { emitToEmergency, emitToUser } from '../services/socket';
 import { AuthRequest, authenticate } from '../middleware/auth';
+import { getUserDisplayName } from '../utils/userDisplay';
 import messageRoutes from './messages';
 
 const router = express.Router();
@@ -54,12 +55,13 @@ router.post(
         (p: any) => p !== null
       );
 
-      // Get sender email for notifications
+      // Get sender display name and email for notifications
       const userResult = await query(
-        'SELECT email FROM users WHERE id = $1',
+        'SELECT display_name, email FROM users WHERE id = $1',
         [userId]
       );
-      const senderEmail = userResult.rows[0]?.email || 'Someone';
+      const senderUser = userResult.rows[0] || { email: 'Someone' };
+      const senderDisplayName = getUserDisplayName(senderUser);
 
       // Send notifications to all registered contacts
       for (const participant of participants) {
@@ -69,7 +71,7 @@ router.post(
             await sendEmergencyAlert(
               participant.userId,
               emergency.id,
-              senderEmail,
+              senderDisplayName,
               undefined // Location will be sent when user accepts
             );
           } catch (error) {
@@ -81,7 +83,7 @@ router.post(
             await sendEmergencyWebPush(
               participant.userId,
               emergency.id,
-              senderEmail
+              senderDisplayName
             );
           } catch (error) {
             console.error(`Failed to send web push to ${participant.userId}:`, error);
@@ -91,8 +93,8 @@ router.post(
           emitToUser(participant.userId, 'emergency_created', {
             emergencyId: emergency.id,
             userId,
-            userEmail: senderEmail,
-            senderName: senderEmail,
+            userEmail: senderUser.email,
+            senderName: senderDisplayName,
             participants: participants.length,
           });
         }
@@ -141,11 +143,21 @@ router.post(
       // Update participant status to accepted
       await Emergency.updateParticipantStatus(emergencyId, userId, 'accepted');
 
+      // Get user's display name for socket event
+      const userResult = await query(
+        'SELECT display_name, email FROM users WHERE id = $1',
+        [userId]
+      );
+      const user = userResult.rows[0] || { email: participant.user_email };
+      const userDisplayName = getUserDisplayName(user);
+
       // Emit socket event to all participants
       emitToEmergency(emergencyId, 'participant_accepted', {
         emergencyId,
         userId,
-        userName: participant.user_email,
+        userName: userDisplayName,
+        user_email: user.email,
+        user_display_name: userDisplayName,
       });
 
       res.json({
@@ -240,18 +252,21 @@ router.post(
       // Add location
       await Emergency.addLocation(emergencyId, userId, latitude, longitude);
 
-      // Get user's email for socket event
+      // Get user's display name and email for socket event
       const userResult = await query(
-        'SELECT email FROM users WHERE id = $1',
+        'SELECT display_name, email FROM users WHERE id = $1',
         [userId]
       );
-      const userEmail = userResult.rows[0]?.email || null;
+      const user = userResult.rows[0] || { email: null };
+      const userDisplayName = getUserDisplayName(user);
+      const userEmail = user.email || null;
 
-      // Emit socket event to all participants (include user_email for frontend display)
+      // Emit socket event to all participants (include user_display_name for frontend display)
       emitToEmergency(emergencyId, 'location_update', {
         emergencyId,
         userId,
         user_email: userEmail,
+        user_display_name: userDisplayName,
         latitude,
         longitude,
         timestamp: new Date().toISOString(),
@@ -271,7 +286,8 @@ router.get('/pending', authenticate, async (req: AuthRequest, res: Response) => 
     const userId = req.userId!;
     const result = await query(
       `SELECT DISTINCT e.id, e.user_id, e.status, e.created_at, e.ended_at,
-              u.email as sender_email
+              u.email as sender_email,
+              COALESCE(u.display_name, u.email) as sender_display_name
        FROM emergencies e
        JOIN emergency_participants ep ON e.id = ep.emergency_id
        JOIN users u ON e.user_id = u.id

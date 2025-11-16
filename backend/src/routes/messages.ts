@@ -56,7 +56,8 @@ router.get(
           em.audio_url,
           em.video_url,
           em.created_at,
-          u.email as user_email
+          u.email as user_email,
+          COALESCE(u.display_name, u.email) as user_display_name
         FROM emergency_messages em
         JOIN users u ON em.user_id = u.id
         WHERE em.emergency_id = $1
@@ -70,6 +71,7 @@ router.get(
         emergency_id: row.emergency_id,
         user_id: row.user_id,
         user_email: row.user_email,
+        user_display_name: row.user_display_name,
         message: row.message,
         image_url: row.image_url,
         audio_url: row.audio_url,
@@ -178,12 +180,14 @@ router.post(
 
       const savedMessage = result.rows[0];
 
-      // Get user email for socket event and response
+      // Get user display name and email for socket event and response
       const userResult = await query(
-        'SELECT email FROM users WHERE id = $1',
+        'SELECT display_name, email FROM users WHERE id = $1',
         [userId]
       );
-      const userEmail = userResult.rows[0]?.email || null;
+      const user = userResult.rows[0] || { email: null };
+      const userEmail = user.email || null;
+      const userDisplayName = user.display_name || userEmail;
 
       // Emit socket event to all participants in emergency room IMMEDIATELY
       const messageData = {
@@ -191,6 +195,7 @@ router.post(
         messageId: savedMessage.id,
         userId,
         user_email: userEmail,
+        user_display_name: userDisplayName,
         message: savedMessage.message,
         image_url: savedMessage.image_url,
         audio_url: savedMessage.audio_url,
@@ -209,11 +214,12 @@ router.post(
       
       emitToEmergency(emergencyId, 'new_message', messageData);
 
-      // Include user_email in response for immediate frontend display
+      // Include user_email and user_display_name in response for immediate frontend display
       res.status(201).json({
         message: {
           ...savedMessage,
           user_email: userEmail,
+          user_display_name: userDisplayName,
         },
       });
     } catch (error: any) {

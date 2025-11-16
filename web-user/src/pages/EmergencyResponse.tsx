@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { stopEmergencySound } from '../services/notifications'
 import './EmergencyResponse.css'
 
 function EmergencyResponse() {
@@ -10,21 +11,49 @@ function EmergencyResponse() {
   const [senderName, setSenderName] = useState('Someone')
 
   useEffect(() => {
+    // STOP THE SOUND immediately when user reaches response page
+    stopEmergencySound();
+    
+    // Also send message to service worker to stop sound
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'STOP_EMERGENCY_SOUND'
+      });
+    }
+    
     // Load emergency details to get sender name
-    loadEmergency()
+    loadEmergency();
+    
+    return () => {
+      // Cleanup on unmount - ensure sound is stopped
+      stopEmergencySound();
+    };
   }, [id])
 
   const loadEmergency = async () => {
     try {
       const response = await api.get(`/emergencies/${id}`)
-      // Get sender name from emergency
-      setSenderName('Emergency Contact')
+      // Get sender display name from emergency participants or emergency data
+      const emergency = response.data.emergency
+      const participants = response.data.participants || []
+      
+      // Find the sender (user_id matches emergency.user_id)
+      const sender = participants.find((p: any) => p.user_id === emergency.user_id)
+      if (sender) {
+        setSenderName(sender.user_display_name || sender.user_email || 'Someone')
+      } else {
+        // Fallback: try to get from emergency data if available
+        setSenderName('Emergency Contact')
+      }
     } catch (err) {
       console.error('Failed to load emergency:', err)
     }
   }
 
   const acceptEmergency = async () => {
+    // STOP THE SOUND immediately when user responds
+    stopEmergencySound();
+    
     setLoading(true)
     try {
       await api.post(`/emergencies/${id}/accept`, {})
@@ -68,7 +97,14 @@ function EmergencyResponse() {
   }
 
   const rejectEmergency = async () => {
-    if (!confirm('Mark yourself as unavailable for this emergency?')) return
+    // STOP THE SOUND immediately when user responds
+    stopEmergencySound();
+    
+    if (!confirm('Mark yourself as unavailable for this emergency?')) {
+      // If user cancels, sound was already stopped, but restart it since they didn't actually respond
+      // Actually, don't restart - let them decide
+      return;
+    }
 
     setLoading(true)
     try {
