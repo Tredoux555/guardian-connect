@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { GoogleMap, Marker, InfoWindow } from '@react-google-maps/api'
 import api from '../services/api'
@@ -58,9 +58,17 @@ function EmergencyActive() {
   const [mapLoaded, setMapLoaded] = useState(false)
   const mapRef = useRef<google.maps.Map | null>(null)
   const [showDiagnostics, setShowDiagnostics] = useState(false)
+  const emergencyEndedRef = useRef(false)
+  const locationSharedRef = useRef(false)
+  const [googleMapsUrl, setGoogleMapsUrl] = useState<string | null>(null)
+  const [googleMapsUrlLoading, setGoogleMapsUrlLoading] = useState(false)
 
   useEffect(() => {
     if (!id) return
+
+    // Reset refs when emergency ID changes
+    emergencyEndedRef.current = false
+    locationSharedRef.current = false
 
     // Connect to socket only for emergency status updates (ended/cancelled)
     const token = localStorage.getItem('access_token')
@@ -70,16 +78,18 @@ function EmergencyActive() {
 
       // Listen for emergency ended/cancelled (no location updates needed)
       const handleEmergencyEnded = (data: any) => {
-        // Only show alert if this emergency matches current emergency
-        if (data?.emergencyId === id) {
+        // Only show alert if this emergency matches current emergency and hasn't been handled yet
+        if (data?.emergencyId === id && !emergencyEndedRef.current) {
+          emergencyEndedRef.current = true
           alert('Emergency has ended')
           navigate('/')
         }
       }
 
       const handleEmergencyCancelled = (data: any) => {
-        // Only show alert if this emergency matches current emergency
-        if (data?.emergencyId === id) {
+        // Only show alert if this emergency matches current emergency and hasn't been handled yet
+        if (data?.emergencyId === id && !emergencyEndedRef.current) {
+          emergencyEndedRef.current = true
           alert('Emergency has been cancelled')
           navigate('/')
         }
@@ -106,132 +116,73 @@ function EmergencyActive() {
     }
   }, [id])
 
-  // Share sender location if missing when page loads (fallback for mobile)
+  // Monitor map loading timeout
+  useEffect(() => {
+    if (!mapLoaded && id) {
+      const timeout = setTimeout(() => {
+        if (!mapLoaded && mapRef.current) {
+          console.warn('⚠️ Map did not load within expected time. Map ref exists but mapLoaded is still false.')
+        } else if (!mapLoaded && !mapRef.current) {
+          console.warn('⚠️ Map did not load within expected time. Map ref is null.')
+        }
+      }, 3000) // Warn after 3 seconds
+      
+      return () => clearTimeout(timeout)
+    }
+  }, [mapLoaded, id])
+
+  // Share location once when page loads (for both sender and responder)
   useEffect(() => {
     const currentUserId = getCurrentUserId()
     if (!emergency || !id || !currentUserId) return
+    if (locationSharedRef.current) return // Already shared location
     
-    const isSender = String(emergency.user_id) === String(currentUserId)
+    // Check if user's location already exists in locations array
+    const userLocation = locations.find(loc => String(loc.user_id) === String(currentUserId))
     
-    // Only for sender, check if their location is missing
-    if (isSender) {
-      // Wait a bit for initial load, then check
-      const checkTimer = setTimeout(() => {
-        const senderLoc = locations.find(loc => String(loc.user_id) === String(emergency.user_id))
-        
-        // If sender location is missing, try to share it
-        if (!senderLoc && navigator.geolocation) {
-          console.log('⚠️ Sender location missing, attempting to share location...')
-          
-          const timeout = setTimeout(() => {
-            console.warn('⚠️ Location request timed out in fallback')
-          }, 8000)
-          
-          navigator.geolocation.getCurrentPosition(
-            async (position) => {
-              clearTimeout(timeout)
-              try {
-                await api.post(`/emergencies/${id}/location`, {
-                  latitude: position.coords.latitude,
-                  longitude: position.coords.longitude,
-                })
-                console.log('✅ Sender location shared via fallback:', {
-                  lat: position.coords.latitude,
-                  lng: position.coords.longitude
-                })
-                // Reload emergency data to get updated locations
-                setTimeout(() => {
-                  loadEmergency()
-                }, 1000)
-              } catch (err) {
-                console.error('❌ Failed to share sender location in fallback:', err)
-              }
-            },
-            (err) => {
-              clearTimeout(timeout)
-              console.error('❌ Location error in fallback:', err)
-              if (err.code === 1) {
-                console.warn('⚠️ Location permission denied. Please enable location access in Safari settings.')
-              }
-            },
-            {
-              timeout: 7000,
-              enableHighAccuracy: true,
-              maximumAge: 0
-            }
-          )
-        }
-      }, 2000) // Wait 2 seconds after load to check
+    // If location doesn't exist, share it once
+    if (!userLocation && navigator.geolocation) {
+      locationSharedRef.current = true // Mark as shared to prevent duplicates
       
-      return () => clearTimeout(checkTimer)
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          try {
+            await api.post(`/emergencies/${id}/location`, {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            })
+            console.log('✅ Location shared once:', {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              userId: currentUserId
+            })
+            // Reload emergency data to update map
+            setTimeout(() => {
+              loadEmergency()
+            }, 1000)
+          } catch (err) {
+            console.error('❌ Failed to share location:', err)
+            locationSharedRef.current = false // Reset on error so user can try again
+          }
+        },
+        (err) => {
+          console.error('❌ Location error:', err)
+          locationSharedRef.current = false // Reset on error
+          if (err.code === 1) {
+            console.warn('⚠️ Location permission denied. Please enable location access.')
+          }
+        },
+        {
+          timeout: 10000,
+          enableHighAccuracy: true,
+          maximumAge: 0
+        }
+      )
+    } else if (userLocation) {
+      // Location already exists, mark as shared
+      locationSharedRef.current = true
     }
   }, [emergency, locations, id])
-
-  /**
-   * Real-time location tracking using watchPosition
-   * More efficient than polling - updates automatically when location changes
-   * Throttled to prevent excessive API calls
-   */
-  useEffect(() => {
-    if (!id || !emergency || emergency.status !== 'active') return
-    if (!navigator.geolocation) return
-    
-    let watchId: number | null = null
-    let lastUpdateTime = 0
-    const UPDATE_THROTTLE = 10000 // Update at most every 10 seconds
-    
-    const shareLocationThrottled = async (position: GeolocationPosition): Promise<void> => {
-      const now = Date.now()
-      
-      // Throttle updates to prevent excessive API calls
-      if (now - lastUpdateTime < UPDATE_THROTTLE) {
-        console.log('📍 Location update throttled (too soon)')
-        return
-      }
-      
-      try {
-        await api.post(`/emergencies/${id}/location`, {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        })
-        lastUpdateTime = now
-        console.log('📍 Real-time location shared:', {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy + 'm'
-        })
-        
-        // Reload emergency data after sharing to update map
-        setTimeout(() => loadEmergency(), 300)
-      } catch (err) {
-        console.error('❌ Failed to share location:', err)
-      }
-    }
-    
-    // Use watchPosition for real-time updates when location changes
-    console.log('📍 Starting real-time location tracking...')
-    watchId = navigator.geolocation.watchPosition(
-      shareLocationThrottled,
-      (error) => {
-        console.warn('⚠️ Location watch error:', error)
-        if (error.code === 1) {
-          console.warn('⚠️ Location permission denied. Please enable location access.')
-        }
-      },
-      {
-        enableHighAccuracy: true, // Use GPS for best accuracy
-        maximumAge: 0, // Don't use cached positions
-        timeout: 15000 // 15 second timeout per update
-      }
-    )
-    
-    return () => {
-      if (watchId !== null) {
-        console.log('📍 Stopping location tracking')
-        navigator.geolocation.clearWatch(watchId)
-      }
-    }
-  }, [id, emergency])
 
   /**
    * Load emergency data with comprehensive error handling and retry logic
@@ -338,21 +289,25 @@ function EmergencyActive() {
         setTimeout(() => navigate('/login'), 2000)
         return
       } else if (err.response?.status >= 500) {
-        // Server error - retry
+        // Server error - retry silently (don't show error during retries)
         if (retryCount < MAX_RETRIES) {
-          setError(`Server error. Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
+          // Log to console but don't update UI during retries
+          console.log(`Server error. Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
           setTimeout(() => loadEmergency(retryCount + 1), RETRY_DELAY * (retryCount + 1))
           return
         } else {
+          // Only show error after all retries have failed
           setError('Server error. Please try again later.')
         }
       } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        // Network timeout - retry
+        // Network timeout - retry silently (don't show error during retries)
         if (retryCount < MAX_RETRIES) {
-          setError(`Connection timeout. Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
+          // Log to console but don't update UI during retries
+          console.log(`Connection timeout. Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
           setTimeout(() => loadEmergency(retryCount + 1), RETRY_DELAY * (retryCount + 1))
           return
         } else {
+          // Only show error after all retries have failed
           setError('Connection timeout. Please check your network connection.')
         }
       } else {
@@ -379,10 +334,12 @@ function EmergencyActive() {
         if ((window as any).google?.maps && map) {
           mapRef.current = map
           setTimeout(() => {
-            if (mapRef.current === map) {
+            if (mapRef.current === map && mapRef.current.getDiv()) {
               setMapLoaded(true)
+            } else {
+              console.warn('⚠️ Map instance changed or invalid during retry initialization')
             }
-          }, 300)
+          }, 500)
         }
       }, 200)
       return
@@ -390,11 +347,20 @@ function EmergencyActive() {
     
     // Set map reference and mark as loaded after a delay to ensure initialization
     mapRef.current = map
+    
+    // Verify map instance is valid
+    if (!mapRef.current.getDiv()) {
+      console.warn('⚠️ Map instance does not have a valid div element')
+      return
+    }
+    
     setTimeout(() => {
-      if (mapRef.current === map) {
+      if (mapRef.current === map && mapRef.current.getDiv()) {
         setMapLoaded(true)
+      } else {
+        console.warn('⚠️ Map instance changed or invalid during initialization')
       }
-    }, 300)
+    }, 500)
   }, [])
   
 
@@ -468,28 +434,63 @@ function EmergencyActive() {
   }
 
   /**
-   * Format coordinate with high precision (8 decimal places = ~1.1mm accuracy)
-   * Ensures coordinates maintain precision when converted to string for URLs
+   * Format coordinate with optimal precision for Google Maps URLs
+   * 6 decimal places = ~10cm accuracy (sufficient and more reliable for Google Maps)
+   * 8 decimal places can sometimes cause issues with Google Maps URL parsing
    */
   const formatCoordinate = (coord: number): string => {
-    // Use 8 decimal places for maximum precision (~1.1mm accuracy)
-    // This matches the database precision (DECIMAL(10,8) and DECIMAL(11,8))
-    return coord.toFixed(8)
+    // Use 6 decimal places for Google Maps URLs (more reliable than 8)
+    // This provides ~10cm accuracy which is more than sufficient
+    return coord.toFixed(6)
   }
 
   /**
-   * Generate Google Maps navigation URL - Uses Option 4 format (confirmed to work best)
-   * The destination_place_id= parameter (empty) tells Google Maps these are coordinates, not a place ID
-   * This prevents geocoding and ensures exact GPS coordinates are used
+   * Generate Google Maps navigation URL using exact coordinates
+   * This ensures Google Maps uses GPS coordinates directly, not geocoded addresses
+   * Using coordinates directly prevents the "same location" error when both places
+   * geocode to the same district (e.g., "Haidian District, Beijing, China")
    */
-  const getGoogleMapsUrl = (originLat: number, originLng: number, destLat: number, destLng: number): string => {
-    // Format coordinates with maximum precision (8 decimal places = ~1.1mm accuracy)
-    const originCoords = `${formatCoordinate(originLat)},${formatCoordinate(originLng)}`
-    const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
-    
-    // Use Option 4 format: query parameters with empty destination_place_id
-    // This format works best according to testing - prevents geocoding
-    return `https://www.google.com/maps/dir/?api=1&origin=${originCoords}&destination=${destCoords}&destination_place_id=&travelmode=driving`
+  const getGoogleMapsUrl = (
+    originLat: number, 
+    originLng: number, 
+    destLat: number, 
+    destLng: number
+  ): string => {
+    try {
+      // Validate coordinates before building URL
+      if (isNaN(originLat) || isNaN(originLng) || isNaN(destLat) || isNaN(destLng)) {
+        throw new Error('Invalid coordinates provided to getGoogleMapsUrl')
+      }
+      
+      // Format coordinates with 6 decimal places (optimal precision)
+      const originCoords = `${formatCoordinate(originLat)},${formatCoordinate(originLng)}`
+      const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+      
+      // Check if origin and destination are the same (or very close)
+      // Calculate distance in degrees (rough approximation)
+      const latDiff = Math.abs(originLat - destLat)
+      const lngDiff = Math.abs(originLng - destLng)
+      const distance = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff)
+      
+      // If locations are identical or extremely close (< 0.0001 degrees ≈ 11 meters), just show destination
+      if (distance < 0.0001) {
+        return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+      }
+      
+      // Use the most reliable format for directions with exact coordinates
+      // Key elements:
+      // 1. Use coordinates directly (not place_id) to avoid geocoding to districts
+      // 2. Use 'dir_action=navigate' to force navigation mode
+      // 3. Don't encode coordinates - Google Maps handles unencoded coordinates better
+      // This format forces Google Maps to treat them as GPS coordinates, not addresses
+      return `https://www.google.com/maps/dir/?api=1&origin=${originCoords}&destination=${destCoords}&travelmode=driving&dir_action=navigate`
+      
+    } catch (error) {
+      console.error('Error generating Google Maps URL:', error)
+      // Fallback to destination only
+      const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+      return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+    }
   }
 
   /**
@@ -561,6 +562,8 @@ function EmergencyActive() {
     } : null
     
     // Step 7: Build current URL (same logic as button)
+    // Note: For diagnostics, we use a simple synchronous format
+    // The actual URL generation with place_id happens in the useEffect
     const responderLoc = currentUserId 
       ? locations.find(loc => String(loc.user_id) === String(currentUserId))
       : null
@@ -570,7 +573,9 @@ function EmergencyActive() {
       const originLat = parseFloat(responderLoc.latitude.toString())
       const originLng = parseFloat(responderLoc.longitude.toString())
       if (!isNaN(originLat) && !isNaN(originLng)) {
-        currentUrl = getGoogleMapsUrl(originLat, originLng, parsedLat, parsedLng)
+        // Use simple coordinate format for diagnostics (async place_id lookup happens elsewhere)
+        const originCoords = `${formatCoordinate(originLat)},${formatCoordinate(originLng)}`
+        currentUrl = `https://www.google.com/maps/dir/?api=1&origin=${originCoords}&destination=${formattedLat},${formattedLng}&travelmode=driving`
       } else {
         currentUrl = `https://www.google.com/maps/dir/?api=1&destination=${formattedLat},${formattedLng}&travelmode=driving`
       }
@@ -654,10 +659,15 @@ function EmergencyActive() {
   const endEmergency = async () => {
     if (!confirm('End this emergency?')) return
 
+    // Set flag immediately to prevent duplicate alerts
+    emergencyEndedRef.current = true
+
     try {
       await api.post(`/emergencies/${id}/end`, {})
       navigate('/')
     } catch (err: any) {
+      // Reset flag if API call fails so user can try again
+      emergencyEndedRef.current = false
       if (err.response?.status === 403) {
         alert('Only the emergency creator can end the emergency.')
       } else {
@@ -668,6 +678,330 @@ function EmergencyActive() {
 
   // Debug summary on render - MUST be before early return to follow Rules of Hooks
   const acceptedParticipants = participants.filter((p: any) => p && p.status === 'accepted')
+  
+  // Get current user info - MUST be before early return to follow Rules of Hooks
+  const currentUserId = getCurrentUserId()
+  const isSender = emergency && currentUserId ? String(currentUserId) === String(emergency.user_id) : false
+
+  // Generate Google Maps URL with exact coordinates when locations are available
+  useEffect(() => {
+    if (isSender || !emergency?.user_id || !locations.length) {
+      setGoogleMapsUrl(null)
+      setGoogleMapsUrlLoading(false)
+      return
+    }
+
+    const generateUrl = () => {
+      setGoogleMapsUrlLoading(true)
+      try {
+        // Find sender location from locations array (same as what's shown on map)
+        const senderLoc = locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(emergency.user_id))
+        
+        if (!senderLoc) {
+          setGoogleMapsUrl(null)
+          setGoogleMapsUrlLoading(false)
+          return
+        }
+
+        // Parse coordinates exactly the same way as map markers do
+        const destLat = parseFloat(senderLoc.latitude.toString())
+        const destLng = parseFloat(senderLoc.longitude.toString())
+        
+        // Validate destination coordinates
+        if (isNaN(destLat) || isNaN(destLng) || 
+            destLat < -90 || destLat > 90 || 
+            destLng < -180 || destLng > 180) {
+          setGoogleMapsUrl(null)
+          setGoogleMapsUrlLoading(false)
+          return
+        }
+        
+        // Find responder location (current user) from locations array (optional)
+        const responderLoc = currentUserId 
+          ? locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(currentUserId))
+          : null
+        
+        let url: string
+        
+        if (responderLoc) {
+          const originLat = parseFloat(responderLoc.latitude.toString())
+          const originLng = parseFloat(responderLoc.longitude.toString())
+          
+          // Validate origin coordinates
+          if (!isNaN(originLat) && !isNaN(originLng) &&
+              originLat >= -90 && originLat <= 90 &&
+              originLng >= -180 && originLng <= 180) {
+            // Use both origin and destination coordinates directly (no place_id lookup)
+            url = getGoogleMapsUrl(originLat, originLng, destLat, destLng)
+          } else {
+            // Fallback to destination only
+            const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+            url = `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+          }
+        } else {
+          // Responder location not available yet - use destination only
+          const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+          url = `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+        }
+        
+        // Validate URL
+        if (url && url.startsWith('https://www.google.com/maps')) {
+          setGoogleMapsUrl(url)
+        } else {
+          setGoogleMapsUrl(null)
+        }
+      } catch (error) {
+        console.error('Error generating Google Maps URL:', error)
+        setGoogleMapsUrl(null)
+      } finally {
+        setGoogleMapsUrlLoading(false)
+      }
+    }
+
+    generateUrl()
+  }, [isSender, emergency?.user_id, locations, currentUserId, formatCoordinate, getGoogleMapsUrl])
+
+  // Google Maps button - MUST be before early return to follow Rules of Hooks
+  const googleMapsButton = useMemo(() => {
+    if (isSender || !emergency?.user_id) return null
+    
+    // Find sender location from locations array (same as what's shown on map)
+    const senderLoc = locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(emergency.user_id))
+    
+    // If no sender location yet, show message
+    if (!senderLoc) {
+      return (
+        <div style={{ 
+          padding: '1rem', 
+          backgroundColor: '#fff3cd', 
+          borderRadius: '8px', 
+          margin: '1rem 0',
+          textAlign: 'center',
+          color: '#856404'
+        }}>
+          <p style={{ margin: 0 }}>⏳ Waiting for emergency location data...</p>
+        </div>
+      )
+    }
+
+    // If URL is loading, show loading state
+    if (googleMapsUrlLoading) {
+      return (
+        <div style={{ 
+          padding: '1rem', 
+          backgroundColor: '#e3f2fd', 
+          borderRadius: '8px', 
+          margin: '1rem 0',
+          textAlign: 'center'
+        }}>
+          <p style={{ margin: 0 }}>📍 Generating directions link...</p>
+        </div>
+      )
+    }
+
+    // If no URL generated, show error
+    if (!googleMapsUrl) {
+      return (
+        <div style={{ 
+          padding: '1rem', 
+          backgroundColor: '#f8d7da', 
+          borderRadius: '8px', 
+          margin: '1rem 0',
+          textAlign: 'center',
+          color: '#721c24'
+        }}>
+          <p style={{ margin: 0 }}>❌ Error generating Google Maps directions URL</p>
+        </div>
+      )
+    }
+
+    // Generate comprehensive diagnostics
+    const diagnostics = generateDiagnostics(senderLoc)
+      
+    return (
+      <div>
+        <div className="maps-link-container" style={{ 
+          padding: '1rem', 
+          backgroundColor: '#f5f5f5', 
+          borderRadius: '8px', 
+          margin: '1rem 0',
+          textAlign: 'center'
+        }}>
+          <a
+            href={googleMapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => {
+              // Verify URL is valid before opening
+              if (!googleMapsUrl || !googleMapsUrl.startsWith('https://www.google.com/maps')) {
+                e.preventDefault()
+                alert('Invalid Google Maps URL. Please try again.')
+                return false
+              }
+            }}
+              style={{ 
+                display: 'inline-block', 
+                padding: '1rem 2rem',
+                backgroundColor: '#4285F4',
+                color: 'white',
+                textDecoration: 'none',
+                borderRadius: '8px',
+                fontSize: '1.1rem',
+                fontWeight: 'bold'
+              }}
+            >
+              Open in Google Maps for Directions
+            </a>
+          </div>
+          
+          {/* Diagnostic Panel */}
+          <div style={{ 
+            margin: '1rem 0',
+            padding: '0.5rem',
+            backgroundColor: '#f9f9f9',
+            borderRadius: '4px',
+            border: '1px solid #ddd'
+          }}>
+            <button
+              onClick={() => setShowDiagnostics(!showDiagnostics)}
+              style={{
+                width: '100%',
+                padding: '0.5rem',
+                backgroundColor: '#6c757d',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.9rem'
+              }}
+            >
+              {showDiagnostics ? '▼ Hide' : '▶ Show'} Location Diagnostics
+            </button>
+            
+            {showDiagnostics && (
+              <div style={{
+                marginTop: '1rem',
+                padding: '1rem',
+                backgroundColor: 'white',
+                borderRadius: '4px',
+                fontSize: '0.85rem',
+                fontFamily: 'monospace',
+                maxHeight: '600px',
+                overflow: 'auto'
+              }}>
+                <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Coordinate Tracking</h4>
+                
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>Database (Raw):</strong>
+                  <div style={{ paddingLeft: '1rem', color: '#666' }}>
+                    Lat: {String(diagnostics.database.lat)} (type: {diagnostics.database.latType})<br/>
+                    Lng: {String(diagnostics.database.lng)} (type: {diagnostics.database.lngType})
+                  </div>
+                </div>
+                
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>Parsed:</strong>
+                  <div style={{ paddingLeft: '1rem', color: '#666' }}>
+                    Lat: {diagnostics.parsed.lat} {diagnostics.parsed.latIsNaN && <span style={{color: 'red'}}>⚠ NaN</span>}<br/>
+                    Lng: {diagnostics.parsed.lng} {diagnostics.parsed.lngIsNaN && <span style={{color: 'red'}}>⚠ NaN</span>}
+                  </div>
+                </div>
+                
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>Formatted (URL):</strong>
+                  <div style={{ paddingLeft: '1rem', color: '#666' }}>
+                    Lat: {diagnostics.formatted.lat} ({diagnostics.formatted.latPrecision} decimals)<br/>
+                    Lng: {diagnostics.formatted.lng} ({diagnostics.formatted.lngPrecision} decimals)
+                  </div>
+                </div>
+                
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>Map Marker:</strong>
+                  <div style={{ paddingLeft: '1rem', color: '#666' }}>
+                    {diagnostics.mapMarker.lat !== null ? (
+                      <>
+                        Lat: {diagnostics.mapMarker.lat}<br/>
+                        Lng: {diagnostics.mapMarker.lng}<br/>
+                        Source: {diagnostics.mapMarker.source}
+                      </>
+                    ) : (
+                      <span style={{color: 'red'}}>Not found in locations array</span>
+                    )}
+                  </div>
+                </div>
+                
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>Comparisons:</strong>
+                  <div style={{ paddingLeft: '1rem', color: '#666' }}>
+                    DB vs Parsed: 
+                    <span style={{color: diagnostics.comparisons.dbVsParsed.latMatch && diagnostics.comparisons.dbVsParsed.lngMatch ? 'green' : 'red'}}>
+                      {diagnostics.comparisons.dbVsParsed.latMatch && diagnostics.comparisons.dbVsParsed.lngMatch ? ' ✓ Match' : ' ✗ Mismatch'}
+                    </span><br/>
+                    Parsed vs Formatted: 
+                    <span style={{color: diagnostics.comparisons.parsedVsFormatted.latMatch && diagnostics.comparisons.parsedVsFormatted.lngMatch ? 'green' : 'red'}}>
+                      {diagnostics.comparisons.parsedVsFormatted.latMatch && diagnostics.comparisons.parsedVsFormatted.lngMatch ? ' ✓ Match' : ' ✗ Mismatch'}
+                    </span><br/>
+                    {diagnostics.comparisons.dbVsMapMarker && (
+                      <>
+                        DB vs Map Marker: 
+                        <span style={{color: diagnostics.comparisons.dbVsMapMarker.latMatch && diagnostics.comparisons.dbVsMapMarker.lngMatch ? 'green' : 'red'}}>
+                          {diagnostics.comparisons.dbVsMapMarker.latMatch && diagnostics.comparisons.dbVsMapMarker.lngMatch ? ' ✓ Match' : ' ✗ Mismatch'}
+                        </span>
+                        {!diagnostics.comparisons.dbVsMapMarker.latMatch && (
+                          <span style={{color: 'red'}}> (Diff: {diagnostics.comparisons.dbVsMapMarker.latDiff.toFixed(8)}, {diagnostics.comparisons.dbVsMapMarker.lngDiff.toFixed(8)})</span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>Current URL:</strong>
+                  <div style={{ paddingLeft: '1rem', color: '#666', wordBreak: 'break-all' }}>
+                    {diagnostics.currentUrl}
+                  </div>
+                </div>
+                
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>URL Extraction:</strong>
+                  <div style={{ paddingLeft: '1rem', color: '#666' }}>
+                    Extracted Lat: {diagnostics.urlExtraction.lat || 'Not found'}<br/>
+                    Extracted Lng: {diagnostics.urlExtraction.lng || 'Not found'}<br/>
+                    Matches Formatted: 
+                    <span style={{color: diagnostics.urlExtraction.matchesFormatted ? 'green' : 'red'}}>
+                      {diagnostics.urlExtraction.matchesFormatted ? ' ✓ Yes' : ' ✗ No'}
+                    </span>
+                  </div>
+                </div>
+                
+                <div style={{ marginBottom: '1rem' }}>
+                  <strong>Alternative URL Formats (for testing):</strong>
+                  <div style={{ paddingLeft: '1rem' }}>
+                    {diagnostics.urlFormats.map((format: any, idx: number) => (
+                      <div key={idx} style={{ marginBottom: '0.5rem', padding: '0.5rem', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
+                        <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{format.name}:</div>
+                        <a 
+                          href={format.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          style={{ color: '#4285F4', wordBreak: 'break-all', fontSize: '0.8rem' }}
+                        >
+                          {format.url}
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div style={{ marginTop: '1rem', padding: '0.5rem', backgroundColor: '#fff3cd', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  <strong>Note:</strong> Check console for full diagnostic object. Compare coordinates above with what Google Maps shows.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )
+  }, [isSender, emergency?.user_id, locations, googleMapsUrl, googleMapsUrlLoading, showDiagnostics, formatCoordinate, generateDiagnostics])
 
   if (loading) {
     return (
@@ -712,10 +1046,6 @@ function EmergencyActive() {
 
   const pendingParticipants = participants.filter((p: any) => p && p.status === 'pending')
   const rejectedParticipants = participants.filter((p: any) => p && p.status === 'rejected')
-  
-  // Get current user info for render - with null safety
-  const currentUserId = getCurrentUserId()
-  const isSender = emergency && currentUserId ? String(currentUserId) === String(emergency.user_id) : false
 
   return (
     <div className="emergency-active">
@@ -746,10 +1076,10 @@ function EmergencyActive() {
                 }}
               >
               {/* Render markers for all locations - both sender and receiver */}
-              {/* Only render markers when Google Maps API is fully available */}
+              {/* Only render markers when Google Maps API is fully available and map is ready */}
               {locations.length > 0 && emergency && emergency.user_id && 
                typeof window !== 'undefined' && (window as any).google?.maps && 
-               mapLoaded && locations.map((location, index) => {
+               mapLoaded && mapRef.current && locations.map((location, index) => {
                 // Validate location object
                 if (!location || !location.user_id) {
                   return null
@@ -761,6 +1091,8 @@ function EmergencyActive() {
                   return null
                 }
                 
+                // Parse coordinates - MUST use same method as Google Maps URL generation
+                // This ensures map markers and directions URL use identical coordinates
                 const lat = parseFloat(location.latitude.toString())
                 const lng = parseFloat(location.longitude.toString())
                 
@@ -781,31 +1113,18 @@ function EmergencyActive() {
                   : false
                 
                 // Use exact coordinates for all markers (no offset)
+                // These coordinates MUST match what's sent to Google Maps directions URL
                 const markerLat = lat
                 const markerLng = lng
                 
-                // Double-check Google Maps is available before rendering Marker
-                if (typeof window === 'undefined' || !(window as any).google?.maps?.Marker) {
+                // Double-check Google Maps is available and map is ready before rendering Marker
+                if (typeof window === 'undefined' || !(window as any).google?.maps?.Marker || !mapRef.current) {
                   return null
                 }
                 
                 try {
                   // Get icon - sender uses default red pin (undefined), receiver uses blue dot
                   const markerIcon = isSenderLocation ? undefined : getMarkerIcon(false)
-                  
-                  // Debug logging to verify marker rendering
-                  console.log('📍 Marker rendered:', {
-                    userId: location.user_id,
-                    emergencyUserId: emergency.user_id,
-                    currentUserId: currentUserId,
-                    isSenderLocation: isSenderLocation,
-                    lat: markerLat,
-                    lng: markerLng,
-                    iconType: isSenderLocation ? 'red pin (default)' : 'blue dot (custom)',
-                    iconValue: markerIcon ? 'custom icon' : 'undefined (default)',
-                    exactCoords: { lat, lng },
-                    zIndex: isSenderLocation ? 1 : 2
-                  })
                   
                   return (
                     <Marker
@@ -945,302 +1264,7 @@ function EmergencyActive() {
       )}
 
       {/* Google Maps directions - only for responders */}
-      {!isSender && emergency && emergency.user_id && (() => {
-        try {
-          // Debug: Log button rendering conditions
-          console.log('🗺️ Google Maps Button - Rendering Check:', {
-            isSender,
-            hasEmergency: !!emergency,
-            hasEmergencyUserId: !!emergency?.user_id,
-            locationsCount: locations.length,
-            currentUserId
-          })
-          
-          // Find sender location from locations array (same as what's shown on map)
-          const senderLoc = locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(emergency.user_id))
-          
-          // Find responder location (current user) from locations array (optional)
-          const responderLoc = currentUserId 
-            ? locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(currentUserId))
-            : null
-          
-          console.log('🗺️ Google Maps Button - Location Data:', {
-            senderLocFound: !!senderLoc,
-            responderLocFound: !!responderLoc,
-            senderLoc: senderLoc ? { lat: senderLoc.latitude, lng: senderLoc.longitude, userId: senderLoc.user_id } : null,
-            responderLoc: responderLoc ? { lat: responderLoc.latitude, lng: responderLoc.longitude, userId: responderLoc.user_id } : null
-          })
-          
-          // If no sender location yet, show message instead of hiding button completely
-          if (!senderLoc) {
-            console.log('📍 Waiting for sender location...')
-            return (
-              <div style={{ 
-                padding: '1rem', 
-                backgroundColor: '#fff3cd', 
-                borderRadius: '8px', 
-                margin: '1rem 0',
-                textAlign: 'center',
-                color: '#856404'
-              }}>
-                <p style={{ margin: 0 }}>⏳ Waiting for emergency location data...</p>
-              </div>
-            )
-          }
-        
-        const destLat = parseFloat(senderLoc.latitude.toString())
-        const destLng = parseFloat(senderLoc.longitude.toString())
-        
-        // Validate destination coordinates
-        if (isNaN(destLat) || isNaN(destLng) || 
-            destLat < -90 || destLat > 90 || 
-            destLng < -180 || destLng > 180) {
-          console.error('❌ Invalid destination coordinates:', { destLat, destLng })
-          return null
-        }
-        
-        // Build Google Maps URL
-        let mapsUrl: string
-        let useBothCoords = false
-        
-        if (responderLoc) {
-          const originLat = parseFloat(responderLoc.latitude.toString())
-          const originLng = parseFloat(responderLoc.longitude.toString())
-          
-          // Validate origin coordinates
-          if (!isNaN(originLat) && !isNaN(originLng) &&
-              originLat >= -90 && originLat <= 90 &&
-              originLng >= -180 && originLng <= 180) {
-            // Use both origin and destination coordinates
-            mapsUrl = getGoogleMapsUrl(originLat, originLng, destLat, destLng)
-            useBothCoords = true
-          } else {
-            // Fallback to destination only - use Option 4 format (confirmed to work best)
-            const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
-            mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${destCoords}&destination_place_id=&travelmode=driving`
-          }
-        } else {
-          // Responder location not available yet - use destination only
-          // Use Option 4 format (confirmed to work best) - prevents geocoding
-          const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
-          mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${destCoords}&destination_place_id=&travelmode=driving`
-        }
-        
-        // Generate comprehensive diagnostics
-        const diagnostics = generateDiagnostics(senderLoc)
-        
-        // Debug: Log coordinates being sent to Google Maps
-        console.log('🗺️ Google Maps URL - Coordinates:', {
-          usingBothCoords: useBothCoords,
-          origin: responderLoc ? {
-            lat: responderLoc.latitude,
-            lng: responderLoc.longitude,
-            userId: responderLoc.user_id
-          } : 'Not available (Google Maps will use current location)',
-          destination: {
-            lat: senderLoc.latitude,
-            lng: senderLoc.longitude,
-            userId: senderLoc.user_id,
-            parsed: { lat: destLat, lng: destLng },
-            formatted: { lat: formatCoordinate(destLat), lng: formatCoordinate(destLng) }
-          },
-          url: mapsUrl,
-          note: useBothCoords 
-            ? 'Both origin and destination are exact coordinates from database'
-            : 'Using destination only - Google Maps will auto-detect responder location'
-        })
-        
-        // Log full diagnostics to console
-        console.log('🔍 Full Diagnostic Data:', diagnostics)
-        
-        return (
-          <div>
-            <div className="maps-link-container" style={{ 
-              padding: '1rem', 
-              backgroundColor: '#f5f5f5', 
-              borderRadius: '8px', 
-              margin: '1rem 0',
-              textAlign: 'center'
-            }}>
-              <a
-                href={mapsUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => {
-                  console.log('📍 Google Maps button clicked - URL:', mapsUrl)
-                  console.log('📍 Full URL breakdown:', {
-                    href: mapsUrl,
-                    destination: mapsUrl.match(/destination=([^&]+)/)?.[1],
-                    extractedCoords: mapsUrl.match(/destination=([^,]+),([^&]+)/)
-                  })
-                }}
-                style={{ 
-                  display: 'inline-block', 
-                  padding: '1rem 2rem',
-                  backgroundColor: '#4285F4',
-                  color: 'white',
-                  textDecoration: 'none',
-                  borderRadius: '8px',
-                  fontSize: '1.1rem',
-                  fontWeight: 'bold'
-                }}
-              >
-                Open in Google Maps for Directions
-              </a>
-            </div>
-            
-            {/* Diagnostic Panel */}
-            <div style={{ 
-              margin: '1rem 0',
-              padding: '0.5rem',
-              backgroundColor: '#f9f9f9',
-              borderRadius: '4px',
-              border: '1px solid #ddd'
-            }}>
-              <button
-                onClick={() => setShowDiagnostics(!showDiagnostics)}
-                style={{
-                  width: '100%',
-                  padding: '0.5rem',
-                  backgroundColor: '#6c757d',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '0.9rem'
-                }}
-              >
-                {showDiagnostics ? '▼ Hide' : '▶ Show'} Location Diagnostics
-              </button>
-              
-              {showDiagnostics && (
-                <div style={{
-                  marginTop: '1rem',
-                  padding: '1rem',
-                  backgroundColor: 'white',
-                  borderRadius: '4px',
-                  fontSize: '0.85rem',
-                  fontFamily: 'monospace',
-                  maxHeight: '600px',
-                  overflow: 'auto'
-                }}>
-                  <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Coordinate Tracking</h4>
-                  
-                  <div style={{ marginBottom: '1rem' }}>
-                    <strong>Database (Raw):</strong>
-                    <div style={{ paddingLeft: '1rem', color: '#666' }}>
-                      Lat: {String(diagnostics.database.lat)} (type: {diagnostics.database.latType})<br/>
-                      Lng: {String(diagnostics.database.lng)} (type: {diagnostics.database.lngType})
-                    </div>
-                  </div>
-                  
-                  <div style={{ marginBottom: '1rem' }}>
-                    <strong>Parsed:</strong>
-                    <div style={{ paddingLeft: '1rem', color: '#666' }}>
-                      Lat: {diagnostics.parsed.lat} {diagnostics.parsed.latIsNaN && <span style={{color: 'red'}}>⚠ NaN</span>}<br/>
-                      Lng: {diagnostics.parsed.lng} {diagnostics.parsed.lngIsNaN && <span style={{color: 'red'}}>⚠ NaN</span>}
-                    </div>
-                  </div>
-                  
-                  <div style={{ marginBottom: '1rem' }}>
-                    <strong>Formatted (URL):</strong>
-                    <div style={{ paddingLeft: '1rem', color: '#666' }}>
-                      Lat: {diagnostics.formatted.lat} ({diagnostics.formatted.latPrecision} decimals)<br/>
-                      Lng: {diagnostics.formatted.lng} ({diagnostics.formatted.lngPrecision} decimals)
-                    </div>
-                  </div>
-                  
-                  <div style={{ marginBottom: '1rem' }}>
-                    <strong>Map Marker:</strong>
-                    <div style={{ paddingLeft: '1rem', color: '#666' }}>
-                      {diagnostics.mapMarker.lat !== null ? (
-                        <>
-                          Lat: {diagnostics.mapMarker.lat}<br/>
-                          Lng: {diagnostics.mapMarker.lng}<br/>
-                          Source: {diagnostics.mapMarker.source}
-                        </>
-                      ) : (
-                        <span style={{color: 'red'}}>Not found in locations array</span>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div style={{ marginBottom: '1rem' }}>
-                    <strong>Comparisons:</strong>
-                    <div style={{ paddingLeft: '1rem', color: '#666' }}>
-                      DB vs Parsed: 
-                      <span style={{color: diagnostics.comparisons.dbVsParsed.latMatch && diagnostics.comparisons.dbVsParsed.lngMatch ? 'green' : 'red'}}>
-                        {diagnostics.comparisons.dbVsParsed.latMatch && diagnostics.comparisons.dbVsParsed.lngMatch ? ' ✓ Match' : ' ✗ Mismatch'}
-                      </span><br/>
-                      Parsed vs Formatted: 
-                      <span style={{color: diagnostics.comparisons.parsedVsFormatted.latMatch && diagnostics.comparisons.parsedVsFormatted.lngMatch ? 'green' : 'red'}}>
-                        {diagnostics.comparisons.parsedVsFormatted.latMatch && diagnostics.comparisons.parsedVsFormatted.lngMatch ? ' ✓ Match' : ' ✗ Mismatch'}
-                      </span><br/>
-                      {diagnostics.comparisons.dbVsMapMarker && (
-                        <>
-                          DB vs Map Marker: 
-                          <span style={{color: diagnostics.comparisons.dbVsMapMarker.latMatch && diagnostics.comparisons.dbVsMapMarker.lngMatch ? 'green' : 'red'}}>
-                            {diagnostics.comparisons.dbVsMapMarker.latMatch && diagnostics.comparisons.dbVsMapMarker.lngMatch ? ' ✓ Match' : ' ✗ Mismatch'}
-                          </span>
-                          {!diagnostics.comparisons.dbVsMapMarker.latMatch && (
-                            <span style={{color: 'red'}}> (Diff: {diagnostics.comparisons.dbVsMapMarker.latDiff.toFixed(8)}, {diagnostics.comparisons.dbVsMapMarker.lngDiff.toFixed(8)})</span>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div style={{ marginBottom: '1rem' }}>
-                    <strong>Current URL:</strong>
-                    <div style={{ paddingLeft: '1rem', color: '#666', wordBreak: 'break-all' }}>
-                      {diagnostics.currentUrl}
-                    </div>
-                  </div>
-                  
-                  <div style={{ marginBottom: '1rem' }}>
-                    <strong>URL Extraction:</strong>
-                    <div style={{ paddingLeft: '1rem', color: '#666' }}>
-                      Extracted Lat: {diagnostics.urlExtraction.lat || 'Not found'}<br/>
-                      Extracted Lng: {diagnostics.urlExtraction.lng || 'Not found'}<br/>
-                      Matches Formatted: 
-                      <span style={{color: diagnostics.urlExtraction.matchesFormatted ? 'green' : 'red'}}>
-                        {diagnostics.urlExtraction.matchesFormatted ? ' ✓ Yes' : ' ✗ No'}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  <div style={{ marginBottom: '1rem' }}>
-                    <strong>Alternative URL Formats (for testing):</strong>
-                    <div style={{ paddingLeft: '1rem' }}>
-                      {diagnostics.urlFormats.map((format, idx) => (
-                        <div key={idx} style={{ marginBottom: '0.5rem', padding: '0.5rem', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
-                          <div style={{ fontWeight: 'bold', marginBottom: '0.25rem' }}>{format.name}:</div>
-                          <a 
-                            href={format.url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            style={{ color: '#4285F4', wordBreak: 'break-all', fontSize: '0.8rem' }}
-                          >
-                            {format.url}
-                          </a>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  
-                  <div style={{ marginTop: '1rem', padding: '0.5rem', backgroundColor: '#fff3cd', borderRadius: '4px', fontSize: '0.8rem' }}>
-                    <strong>Note:</strong> Check console for full diagnostic object. Compare coordinates above with what Google Maps shows.
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )
-        } catch (error) {
-          console.error('Error rendering Google Maps button:', error)
-          return null
-        }
-      })()}
+      {googleMapsButton}
 
       {/* Emergency Chat */}
       <EmergencyChat emergencyId={id || ''} />

@@ -110,13 +110,13 @@ export const onParticipantAccepted = (callback: (data: any) => void) => {
 
 export const onEmergencyEnded = (callback: (data: any) => void) => {
   if (socket) {
-    socket.on('emergency_ended', callback)
+    socket.once('emergency_ended', callback)
   }
 }
 
 export const onEmergencyCancelled = (callback: (data: any) => void) => {
   if (socket) {
-    socket.on('emergency_cancelled', callback)
+    socket.once('emergency_cancelled', callback)
   }
 }
 
