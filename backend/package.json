@@ -2,10 +2,11 @@
   "name": "guardian-connect-backend",
   "version": "1.0.0",
   "description": "Guardian Connect Backend API",
-  "main": "dist/server.js",
+  "main": "dist/src/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
+    "postbuild": "node -e \"try { require('fs').accessSync('dist/src/server.js'); console.log('✓ Build verification passed'); } catch(e) { console.error('ERROR: dist/src/server.js not found after build!'); process.exit(1); }\"",
     "start": "node dist/src/server.js",
     "migrate": "node dist/src/database/migrations/run.js"
   },
