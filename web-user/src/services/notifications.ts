@@ -77,7 +77,7 @@ export const showEmergencyNotification = async (
     return;
   }
 
-  const options: NotificationOptions = {
+  const options: NotificationOptions & { actions?: Array<{ action: string; title: string; icon?: string }> } = {
     body: body,
     icon: '/icon-192x192.png',
     badge: '/icon-192x192.png',
