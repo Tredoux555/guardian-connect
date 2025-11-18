@@ -77,6 +77,7 @@ export const showEmergencyNotification = async (
     return;
   }
 
+  // Notification options with extended type for actions support
   const options: NotificationOptions & { actions?: Array<{ action: string; title: string; icon?: string }> } = {
     body: body,
     icon: '/icon-192x192.png',
