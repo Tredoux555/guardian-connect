@@ -12,7 +12,7 @@ if (!stripeSecretKey) {
 
 export const stripe = stripeSecretKey 
   ? new Stripe(stripeSecretKey, {
-      apiVersion: '2024-12-18.acacia', // Use latest API version
+      apiVersion: '2023-10-16', // Use API version compatible with installed Stripe package
     })
   : null;
 
