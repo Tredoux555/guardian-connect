@@ -84,7 +84,6 @@ export const showEmergencyNotification = async (
     tag: `emergency-${emergencyId}`, // Replace previous notifications
     requireInteraction: true, // Keep visible until user interacts - CRITICAL for emergency
     silent: false, // CRITICAL: Enable sound - nothing is more important
-    renotify: true, // Re-notify even if notification exists
     data: {
       emergencyId: emergencyId,
       url: `/respond/${emergencyId}`, // Direct to response page
