@@ -1,0 +1,61 @@
+# Backend Environment Variables for Railway
+# Copy these into Railway → Your Backend Service → Variables
+
+# ============================================
+# SERVER CONFIGURATION
+# ============================================
+NODE_ENV=production
+PORT=3001
+
+# ============================================
+# DATABASE (Railway provides these automatically)
+# Railway will inject these when you add PostgreSQL service
+# You can reference them like: ${{Postgres.PGHOST}}
+# But it's easier to just add the PostgreSQL service and Railway auto-injects them
+# ============================================
+# DB_HOST=${{Postgres.PGHOST}}
+# DB_PORT=${{Postgres.PGPORT}}
+# DB_NAME=${{Postgres.PGDATABASE}}
+# DB_USER=${{Postgres.PGUSER}}
+# DB_PASSWORD=${{Postgres.PGPASSWORD}}
+
+# ============================================
+# JWT SECRETS (Generated for you - USE THESE!)
+# ============================================
+JWT_SECRET=61bf5370182a805f83f0d6bf87d8d889b11bbcb18835fd6dc7d37556b6ad88dd
+JWT_REFRESH_SECRET=9c02d547c65ce680382ddb6de36a1f22834edfb5a934340f7f9b1e483527b19b
+
+# ============================================
+# CORS (Update after frontend is deployed)
+# ============================================
+ALLOWED_ORIGINS=https://your-frontend-url.railway.app
+
+# ============================================
+# GOOGLE MAPS (Add your key)
+# ============================================
+# VITE_GOOGLE_MAPS_API_KEY=your-google-maps-api-key-here
+
+# ============================================
+# STRIPE (If using donations/subscriptions)
+# ============================================
+# STRIPE_SECRET_KEY=your-stripe-secret-key
+# STRIPE_PUBLISHABLE_KEY=your-stripe-publishable-key
+
+# ============================================
+# VAPID KEYS (If using Web Push notifications)
+# ============================================
+# VAPID_PUBLIC_KEY=your-vapid-public-key
+# VAPID_PRIVATE_KEY=your-vapid-private-key
+# VAPID_SUBJECT=your-email@example.com
+
+# ============================================
+# APP URL (Update after backend is deployed)
+# ============================================
+# APP_URL=https://your-backend-url.railway.app
+
+# ============================================
+# FEATURE FLAGS (Optional)
+# ============================================
+# ENABLE_DONATIONS=true
+# ENABLE_SUBSCRIPTIONS=true
+

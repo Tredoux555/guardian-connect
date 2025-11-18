@@ -3,12 +3,16 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
+// Support Railway's PostgreSQL connection variables
+// Railway provides: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
+// Also support legacy: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'guardian_connect',
-  user: process.env.DB_USER || 'user',
-  password: process.env.DB_PASSWORD || 'password',
+  host: process.env.PGHOST || process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.PGPORT || process.env.DB_PORT || '5432'),
+  database: process.env.PGDATABASE || process.env.DB_NAME || 'guardian_connect',
+  user: process.env.PGUSER || process.env.DB_USER || 'user',
+  password: process.env.PGPASSWORD || process.env.DB_PASSWORD || 'password',
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
