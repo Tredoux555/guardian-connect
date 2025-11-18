@@ -14,7 +14,12 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "baseUrl": ".",
+    "paths": {
+      "../shared/types": ["./shared/types"],
+      "../../shared/types": ["./shared/types"]
+    }
   },
   "include": ["src/**/*", "shared/**/*"],
   "exclude": ["node_modules", "dist"]

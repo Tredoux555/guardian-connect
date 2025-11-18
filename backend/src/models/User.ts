@@ -1,5 +1,5 @@
 import { query } from '../database/db';
-import { User as UserType } from '../shared/types';
+import { User as UserType } from '../types';
 import bcrypt from 'bcrypt';
 
 export class User {

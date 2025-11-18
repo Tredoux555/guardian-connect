@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '../database/db';
-import { JWTPayload } from '../shared/types';
+import { JWTPayload } from '../types';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
