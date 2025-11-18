@@ -60,5 +60,5 @@ If changes aren't appearing:
 **Remember: Code changes on your local machine ≠ Changes on Railway!**
 
 ---
-*Last deployment trigger: $(date)*
+*Last deployment trigger: 2025-01-27*
 
