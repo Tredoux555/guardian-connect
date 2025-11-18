@@ -195,7 +195,7 @@ function Subscriptions() {
   }
 
   const options: StripeElementsOptions = {
-    clientSecret,
+    clientSecret: clientSecret || undefined,
     appearance: {
       theme: 'stripe',
     },

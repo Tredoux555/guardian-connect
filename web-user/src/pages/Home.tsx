@@ -4,7 +4,8 @@ import api from '../services/api'
 import { connectSocket } from '../services/socket'
 import { 
   showEmergencyNotification, 
-  wakeScreen 
+  wakeScreen,
+  requestEmergencyLocation
 } from '../services/notifications'
 import { getCurrentUserId } from '../utils/jwt'
 import { FEATURES } from '../utils/featureFlags'

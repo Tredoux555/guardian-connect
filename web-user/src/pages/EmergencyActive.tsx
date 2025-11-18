@@ -928,7 +928,7 @@ function EmergencyActive() {
         if (isNaN(destLat) || isNaN(destLng) || 
             destLat < -90 || destLat > 90 || 
             destLng < -180 || destLng > 180) {
-          console.error('Invalid destination coordinates:', { destLat, destLng, rawDestLat, rawDestLng, senderLoc })
+          console.error('Invalid destination coordinates:', { destLat, destLng, rawLat: senderLoc.latitude, rawLng: senderLoc.longitude, senderLoc })
           setGoogleMapsUrl(null)
           setGoogleMapsUrlLoading(false)
           return
@@ -1390,7 +1390,7 @@ function EmergencyActive() {
                 if (isNaN(lat) || isNaN(lng) || 
                     lat < -90 || lat > 90 || 
                     lng < -180 || lng > 180) {
-                  console.warn('Invalid coordinates:', { lat, lng, location, rawLat, rawLng })
+                  console.warn('Invalid coordinates:', { lat, lng, location, rawLat: location.latitude, rawLng: location.longitude })
                   return null
                 }
                 

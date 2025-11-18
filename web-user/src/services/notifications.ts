@@ -84,7 +84,6 @@ export const showEmergencyNotification = async (
     tag: `emergency-${emergencyId}`, // Replace previous notifications
     requireInteraction: true, // Keep visible until user interacts - CRITICAL for emergency
     silent: false, // CRITICAL: Enable sound - nothing is more important
-    vibrate: [200, 100, 200, 100, 200, 100, 200, 100, 200], // Stronger vibration pattern
     renotify: true, // Re-notify even if notification exists
     data: {
       emergencyId: emergencyId,
@@ -316,9 +315,11 @@ export const wakeScreen = async (): Promise<void> => {
     console.log('✅ Screen wake lock acquired');
 
     // Handle wake lock release
-    wakeLock.addEventListener('release', () => {
-      console.log('Screen wake lock released');
-    });
+    if (wakeLock) {
+      wakeLock.addEventListener('release', () => {
+        console.log('Screen wake lock released');
+      });
+    }
   } catch (error: any) {
     if (error.name === 'NotAllowedError') {
       console.warn('Screen wake lock not allowed (user may have denied)');
@@ -417,7 +418,7 @@ export const subscribeToPushNotifications = async (): Promise<PushSubscription |
 
     subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: applicationServerKey
+      applicationServerKey: applicationServerKey as BufferSource
     });
 
     // Send subscription to backend
