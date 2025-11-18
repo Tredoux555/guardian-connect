@@ -9,5 +9,5 @@ cmds = ["npm install"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "npm start"
+cmd = "node dist/src/server.js"
 
