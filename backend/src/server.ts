@@ -18,7 +18,7 @@ dotenv.config();
 
 const app: Express = express();
 const httpServer = createServer(app);
-const PORT = process.env.PORT || 3001;
+const PORT = parseInt(process.env.PORT || '3001', 10);
 
 // Initialize Socket.io
 initializeSocket(httpServer);

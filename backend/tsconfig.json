@@ -16,7 +16,7 @@
     "sourceMap": true,
     "noImplicitAny": false
   },
-  "include": ["src/**/*", "../shared/**/*"],
+  "include": ["src/**/*", "shared/**/*"],
   "exclude": ["node_modules", "dist"]
 }
 

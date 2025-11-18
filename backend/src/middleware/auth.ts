@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { query } from '../database/db';
-import { JWTPayload } from '../../shared/types';
+import { JWTPayload } from '../shared/types';
 
 export interface AuthRequest extends Request {
   userId?: string;

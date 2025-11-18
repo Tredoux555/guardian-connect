@@ -1,5 +1,5 @@
 import { query, transaction } from '../database/db';
-import { Emergency as EmergencyType, EmergencyParticipant } from '../../shared/types';
+import { Emergency as EmergencyType, EmergencyParticipant } from '../shared/types';
 import { v4 as uuidv4 } from 'uuid';
 
 export class Emergency {
