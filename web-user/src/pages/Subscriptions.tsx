@@ -5,7 +5,9 @@ import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import './Subscriptions.css'
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '')
+// Only initialize Stripe if key is provided (prevents errors when Stripe is not configured)
+const stripeKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
+const stripePromise = stripeKey ? loadStripe(stripeKey) : null
 
 interface SubscriptionFormProps {
   clientSecret: string
@@ -89,6 +91,17 @@ function Subscriptions() {
   const [currentSubscription, setCurrentSubscription] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Safety check: Stripe must be configured
+  if (!stripePromise) {
+    return (
+      <div className="subscriptions-container">
+        <h1>Subscriptions</h1>
+        <p>Stripe payment processing is not currently configured. Please contact support.</p>
+        <button onClick={() => navigate('/')}>Return Home</button>
+      </div>
+    )
+  }
 
   useEffect(() => {
     loadPlans()

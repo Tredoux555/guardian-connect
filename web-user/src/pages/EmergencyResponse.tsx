@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api'
-import { stopEmergencySound } from '../services/notifications'
+import { stopEmergencySound, playEmergencySound } from '../services/notifications'
 import './EmergencyResponse.css'
 
 function EmergencyResponse() {
@@ -11,22 +11,31 @@ function EmergencyResponse() {
   const [senderName, setSenderName] = useState('Someone')
 
   useEffect(() => {
-    // STOP THE SOUND immediately when user reaches response page
-    stopEmergencySound();
+    // When user reaches response page (via notification click), ensure sound is playing
+    // User interaction (clicking notification) should allow audio to play
+    // Don't stop sound here - let it continue until user clicks a button
     
-    // Also send message to service worker to stop sound
-    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({
-        type: 'STOP_EMERGENCY_SOUND'
-      });
+    // Listen for service worker messages (notification click)
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'EMERGENCY_NOTIFICATION_CLICKED') {
+        // User clicked notification - this is user interaction, sound should play
+        console.log('🔔 Notification clicked, ensuring sound plays');
+        playEmergencySound();
+      }
+    };
+    
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleMessage);
     }
     
     // Load emergency details to get sender name
     loadEmergency();
     
     return () => {
-      // Cleanup on unmount - ensure sound is stopped
-      stopEmergencySound();
+      // Cleanup on unmount
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleMessage);
+      }
     };
   }, [id])
 
@@ -51,8 +60,16 @@ function EmergencyResponse() {
   }
 
   const acceptEmergency = async () => {
-    // STOP THE SOUND immediately when user responds
+    // STOP THE SOUND immediately when user responds - CRITICAL
+    console.log('🛑 Stopping emergency sound (I CAN HELP clicked)');
     stopEmergencySound();
+    
+    // Also send message to service worker immediately
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'STOP_EMERGENCY_SOUND'
+      });
+    }
     
     setLoading(true)
     try {
@@ -97,12 +114,20 @@ function EmergencyResponse() {
   }
 
   const rejectEmergency = async () => {
-    // STOP THE SOUND immediately when user responds
+    // STOP THE SOUND immediately when user responds - CRITICAL
+    console.log('🛑 Stopping emergency sound (UNAVAILABLE clicked)');
     stopEmergencySound();
     
+    // Also send message to service worker immediately
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'STOP_EMERGENCY_SOUND'
+      });
+    }
+    
     if (!confirm('Mark yourself as unavailable for this emergency?')) {
-      // If user cancels, sound was already stopped, but restart it since they didn't actually respond
-      // Actually, don't restart - let them decide
+      // If user cancels, sound was already stopped
+      // Don't restart - let them decide
       return;
     }
 

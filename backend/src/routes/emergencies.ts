@@ -232,6 +232,17 @@ router.post(
       const userId = req.userId!;
       const { latitude, longitude } = req.body;
 
+      // Log received coordinates for debugging
+      console.log('📍 Location received from client:', {
+        emergencyId,
+        userId,
+        latitude,
+        longitude,
+        latitudeType: typeof latitude,
+        longitudeType: typeof longitude,
+        timestamp: new Date().toISOString()
+      });
+
       // Verify emergency exists and is active
       const emergency = await Emergency.findById(emergencyId);
       if (!emergency || emergency.status !== 'active') {
@@ -249,8 +260,25 @@ router.post(
         });
       }
 
-      // Add location
-      await Emergency.addLocation(emergencyId, userId, latitude, longitude);
+      // Validate coordinates before storing
+      const lat = typeof latitude === 'string' ? parseFloat(latitude) : Number(latitude);
+      const lng = typeof longitude === 'string' ? parseFloat(longitude) : Number(longitude);
+      
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        console.error('❌ Invalid coordinates received:', { latitude, longitude, lat, lng });
+        return res.status(400).json({ error: 'Invalid coordinates' });
+      }
+
+      // Add location (database stores as DECIMAL(10,8) and DECIMAL(11,8))
+      await Emergency.addLocation(emergencyId, userId, lat, lng);
+      
+      console.log('✅ Location stored in database:', {
+        emergencyId,
+        userId,
+        storedLatitude: lat,
+        storedLongitude: lng,
+        databasePrecision: 'DECIMAL(10,8) for latitude, DECIMAL(11,8) for longitude'
+      });
 
       // Get user's display name and email for socket event
       const userResult = await query(

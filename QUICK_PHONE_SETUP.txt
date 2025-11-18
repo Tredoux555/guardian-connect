@@ -1,0 +1,41 @@
+📱 QUICK SETUP FOR PHONE ACCESS
+
+Your IP Address: 192.168.1.14
+
+✅ STEP 1: Environment file created
+   File: web-user/.env.local
+   Content: VITE_API_URL=http://192.168.1.14:3001/api
+
+✅ STEP 2: Backend CORS updated
+   Backend now allows connections from your network IP
+
+🔄 STEP 3: RESTART FRONTEND (REQUIRED!)
+   
+   In your terminal where frontend is running:
+   1. Press Ctrl+C to stop it
+   2. Then run:
+      cd web-user
+      npm run dev
+   
+   You should see:
+   ➜  Network: http://192.168.1.14:3003/
+
+📱 STEP 4: Open on your phone
+   
+   1. Make sure phone and computer are on SAME Wi-Fi
+   2. Open browser on phone (Safari/Chrome)
+   3. Go to: http://192.168.1.14:3003
+   4. You should see the login page!
+
+✅ STEP 5: Test
+   - Log in on phone
+   - Grant notification permission
+   - Test emergency alert from another device
+   - Sound should play!
+
+🔧 If it doesn't work:
+   - Check firewall allows ports 3001 and 3003
+   - Verify IP: ifconfig | grep "inet " | grep -v 127.0.0.1
+   - Make sure both devices on same Wi-Fi
+   - See PHONE_ACCESS_SETUP.md for detailed troubleshooting
+

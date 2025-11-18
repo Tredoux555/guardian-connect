@@ -5,7 +5,9 @@ import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import './Donations.css'
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '')
+// Only initialize Stripe if key is provided (prevents errors when Stripe is not configured)
+const stripeKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
+const stripePromise = stripeKey ? loadStripe(stripeKey) : null
 
 interface DonationFormProps {
   clientSecret: string
@@ -80,6 +82,17 @@ function Donations() {
   const [clientSecret, setClientSecret] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Safety check: Stripe must be configured
+  if (!stripePromise) {
+    return (
+      <div className="donations-container">
+        <h1>Donations</h1>
+        <p>Stripe payment processing is not currently configured. Please contact support.</p>
+        <button onClick={() => navigate('/')}>Return Home</button>
+      </div>
+    )
+  }
 
   const handleCreateIntent = async () => {
     setLoading(true)

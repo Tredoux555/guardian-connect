@@ -2,16 +2,16 @@
   display: flex;
   flex-direction: column;
   height: 500px;
-  border: 1px solid #ddd; /* Light grey border for white chat box */
+  border: 1px solid #B3D9FF; /* Darker baby blue border */
   border-radius: 8px;
-  background: white; /* White background for chat box */
+  background: #E6F2FF; /* Soft baby blue background for entire chat box */
   margin: 1rem 0;
 }
 
 .chat-header {
   padding: 1rem;
-  border-bottom: 1px solid #ddd; /* Light grey border for white chat */
-  background: white; /* White header to match chat box */
+  border-bottom: 1px solid #B3D9FF; /* Darker baby blue border */
+  background: #C5E1F5; /* Same shade as "Type a message" input area */
   border-radius: 8px 8px 0 0;
 }
 
@@ -57,7 +57,7 @@
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  background: white; /* White background for messages */
+  background: #E6F2FF; /* Soft baby blue - matches chat box */
 }
 
 .message {
@@ -160,19 +160,19 @@
 .chat-input {
   display: flex;
   padding: 1rem;
-  border-top: 1px solid #ddd; /* Light grey border for white chat */
+  border-top: 1px solid white; /* White border at bottom of chat */
   gap: 0.5rem;
   align-items: center;
-  background: white; /* White background for input area */
+  background: #C5E1F5; /* Slightly darker baby blue for input area */
 }
 
 .message-input {
   flex: 1;
   padding: 0.75rem;
-  border: 1px solid #ddd; /* Light grey border for white chat */
+  border: 1px solid #9CC5E8; /* Darker baby blue border */
   border-radius: 20px;
   font-size: 1rem;
-  background: #f5f5f5; /* Light grey background for input */
+  background: #D4E8F5; /* Slightly darker blue for "Type a message" input */
 }
 
 .message-input:focus {

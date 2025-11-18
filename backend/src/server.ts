@@ -18,7 +18,7 @@ dotenv.config();
 
 const app: Express = express();
 const httpServer = createServer(app);
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 // Initialize Socket.io
 initializeSocket(httpServer);
@@ -28,12 +28,27 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 // CORS configuration - allow all localhost ports for development
+// Also allow network IP addresses for phone access
+// Get current network IP dynamically
+const getNetworkIP = (): string => {
+  // Try to get from environment variable first
+  if (process.env.NETWORK_IP) {
+    return process.env.NETWORK_IP;
+  }
+  // Default to common network IP (update if needed)
+  return '192.168.1.3';
+};
+const networkIP = getNetworkIP(); // Your local network IP
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [
   'http://localhost:3002', // Admin panel (default)
   'http://localhost:3003', // Web user interface (default)
   'http://localhost:3004', // Admin panel (alternative port)
   'http://localhost:3005', // Web user interface (alternative port)
   'http://localhost:3000', // Mobile app (if using web)
+  `http://${networkIP}:3002`, // Admin panel (network)
+  `http://${networkIP}:3003`, // Web user interface (network)
+  `http://${networkIP}:3004`, // Admin panel (network alternative)
+  `http://${networkIP}:3005`, // Web user interface (network alternative)
 ];
 
 app.use(cors({

@@ -83,18 +83,21 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   console.log('🔔 Notification clicked:', event);
   
-  // STOP THE SOUND immediately when user interacts with notification
-  stopEmergencySound();
-  
-  event.notification.close();
-  
   const data = event.notification.data;
   const action = event.action;
   
+  // If user clicks dismiss, stop sound and close
   if (action === 'dismiss') {
-    // User marked as unavailable - sound already stopped
+    stopEmergencySound();
+    event.notification.close();
     return;
   }
+
+  // User interaction (click) should allow audio to play
+  // Don't stop sound immediately - let it continue until user responds on the page
+  // The EmergencyResponse page will stop it when user clicks a button
+  
+  event.notification.close();
 
   // Open or focus the emergency response page
   event.waitUntil(
@@ -105,13 +108,28 @@ self.addEventListener('notificationclick', (event) => {
       for (let i = 0; i < clientList.length; i++) {
         const client = clientList[i];
         if ((client.url.includes('/emergency/') || client.url.includes('/respond/')) && 'focus' in client) {
-          return client.focus();
+          // Focus existing window - this counts as user interaction, sound should now work
+          return client.focus().then(() => {
+            // Send message to client to ensure sound plays (user interaction happened)
+            client.postMessage({
+              type: 'EMERGENCY_NOTIFICATION_CLICKED',
+              emergencyId: data.emergencyId
+            });
+          });
         }
       }
       
-      // Open new window to response page
+      // Open new window to response page - this counts as user interaction
       if (clients.openWindow) {
-        return clients.openWindow(emergencyUrl);
+        return clients.openWindow(emergencyUrl).then((client) => {
+          if (client) {
+            // Send message to new window to ensure sound plays
+            client.postMessage({
+              type: 'EMERGENCY_NOTIFICATION_CLICKED',
+              emergencyId: data.emergencyId
+            });
+          }
+        });
       }
     })
   );
@@ -126,22 +144,41 @@ async function playEmergencySound() {
     // Create audio context for continuous loud sound
     emergencySoundContext = new (self.AudioContext || self.webkitAudioContext)();
     
-    // Generate a continuous, loud, attention-grabbing tone
-    emergencySoundOscillator = emergencySoundContext.createOscillator();
-    emergencySoundGain = emergencySoundContext.createGain();
+    // Function to start the tone (called after context is resumed if needed)
+    const startTone = () => {
+      if (!emergencySoundContext) return;
+      
+      // Generate a continuous, loud, attention-grabbing tone
+      emergencySoundOscillator = emergencySoundContext.createOscillator();
+      emergencySoundGain = emergencySoundContext.createGain();
+      
+      emergencySoundOscillator.connect(emergencySoundGain);
+      emergencySoundGain.connect(emergencySoundContext.destination);
+      
+      // Configure for loud, urgent, continuous sound
+      emergencySoundOscillator.frequency.value = 1000; // Higher frequency for more urgency
+      emergencySoundOscillator.type = 'sine';
+      
+      // Set volume to maximum (browsers limit to ~0.5, but we try higher)
+      emergencySoundGain.gain.setValueAtTime(0.8, emergencySoundContext.currentTime);
+      
+      // Start continuous tone - it will play until stop() is called
+      emergencySoundOscillator.start();
+      console.log('🔊 Emergency tone started in service worker');
+    };
     
-    emergencySoundOscillator.connect(emergencySoundGain);
-    emergencySoundGain.connect(emergencySoundContext.destination);
-    
-    // Configure for loud, urgent, continuous sound
-    emergencySoundOscillator.frequency.value = 1000; // Higher frequency for more urgency
-    emergencySoundOscillator.type = 'sine';
-    
-    // Set volume to maximum (browsers limit to ~0.5, but we try higher)
-    emergencySoundGain.gain.setValueAtTime(0.8, emergencySoundContext.currentTime);
-    
-    // Start continuous tone - it will play until stop() is called
-    emergencySoundOscillator.start();
+    // CRITICAL: Resume AudioContext if suspended
+    if (emergencySoundContext.state === 'suspended') {
+      emergencySoundContext.resume().then(() => {
+        console.log('✅ AudioContext resumed in service worker');
+        startTone();
+      }).catch((err) => {
+        console.error('Failed to resume AudioContext in service worker:', err);
+        startTone();
+      });
+    } else {
+      startTone();
+    }
     
     // Also try to play sound file in continuous loop if available
     try {
@@ -169,34 +206,51 @@ async function playEmergencySound() {
 // Stop emergency sound - called when user responds
 function stopEmergencySound() {
   try {
+    console.log('🛑 Service Worker: stopEmergencySound() called');
+    
+    // Stop the oscillator FIRST (most important)
     if (emergencySoundOscillator) {
       try {
         emergencySoundOscillator.stop();
+        console.log('✅ Service Worker: Oscillator stopped');
       } catch (e) {
         // Already stopped or context closed
+        console.log('⚠️ Service Worker: Oscillator already stopped');
       }
       emergencySoundOscillator = null;
     }
     
+    // Stop the audio source (sound file)
     if (emergencySoundSource) {
       try {
         emergencySoundSource.stop();
+        console.log('✅ Service Worker: Audio source stopped');
       } catch (e) {
         // Already stopped
+        console.log('⚠️ Service Worker: Audio source already stopped');
       }
       emergencySoundSource = null;
     }
     
+    // Close the audio context (this will stop all audio)
     if (emergencySoundContext) {
-      emergencySoundContext.close().catch(() => {
-        // Ignore errors when closing
-      });
+      try {
+        emergencySoundContext.close().then(() => {
+          console.log('✅ Service Worker: AudioContext closed');
+        }).catch(() => {
+          // Ignore errors when closing
+        });
+      } catch (e) {
+        // Context might already be closed
+      }
       emergencySoundContext = null;
     }
     
     emergencySoundGain = null;
+    
+    console.log('✅ Service Worker: Emergency sound stopped completely');
   } catch (error) {
-    console.error('Error stopping emergency sound:', error);
+    console.error('❌ Service Worker: Error stopping emergency sound:', error);
   }
 }
 
@@ -223,6 +277,7 @@ self.addEventListener('message', (event) => {
   console.log('🔔 Service Worker received message:', event.data);
   
   if (event.data && event.data.type === 'STOP_EMERGENCY_SOUND') {
+    console.log('🛑 Service Worker: Received STOP_EMERGENCY_SOUND message');
     stopEmergencySound();
   }
   

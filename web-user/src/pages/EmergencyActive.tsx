@@ -10,6 +10,7 @@ import {
   leaveEmergency,
   onEmergencyEnded,
   onEmergencyCancelled,
+  onLocationUpdate,
   removeListener
 } from '../services/socket'
 import { EmergencyChat } from '../components/EmergencyChat'
@@ -107,6 +108,76 @@ function EmergencyActive() {
     }
   }, [id, navigate])
 
+  // Listen for real-time location updates via socket (speeds up location display)
+  useEffect(() => {
+    if (!id || !emergency) return
+    
+    const handleLocationUpdate = (data: any) => {
+      // Validate location data
+      if (!data || !data.user_id || data.latitude === undefined || data.longitude === undefined) {
+        return
+      }
+      
+      // Use unified coordinate parsing for consistency
+      const lat = parseCoordinate(data.latitude)
+      const lng = parseCoordinate(data.longitude)
+      
+      // Validate coordinates
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return
+      }
+      
+      // Create location object matching Location interface
+      const newLocation: Location = {
+        user_id: String(data.user_id),
+        latitude: lat,
+        longitude: lng,
+        timestamp: data.timestamp || new Date().toISOString(),
+        user_email: data.user_email,
+        user_display_name: data.user_display_name
+      }
+      
+      // Update locations state immediately (remove old location for this user, add new one)
+      setLocations(prevLocations => {
+        const filtered = prevLocations.filter(loc => String(loc.user_id) !== String(data.user_id))
+        const updated = [...filtered, newLocation]
+        
+        // Update sender location if this is the sender
+        if (emergency && String(data.user_id) === String(emergency.user_id)) {
+          setSenderLocation(newLocation)
+        }
+        
+        // Update map center if needed
+        if (updated.length > 1) {
+          const avgLat = updated.reduce((sum, loc) => sum + parseFloat(loc.latitude.toString()), 0) / updated.length
+          const avgLng = updated.reduce((sum, loc) => sum + parseFloat(loc.longitude.toString()), 0) / updated.length
+          setMapCenter({ lat: avgLat, lng: avgLng })
+        } else {
+          setMapCenter({ lat: lat, lng: lng })
+        }
+        
+        return updated
+      })
+      
+      // Only log in development
+      if (import.meta.env.DEV) {
+        console.log('📍 Real-time location update received:', {
+          userId: data.user_id,
+          lat: lat,
+          lng: lng,
+          isSender: emergency && String(data.user_id) === String(emergency.user_id)
+        })
+      }
+    }
+    
+    // Set up socket listener for location updates
+    onLocationUpdate(handleLocationUpdate)
+    
+    return () => {
+      removeListener('location_update', handleLocationUpdate)
+    }
+  }, [id, emergency])
+
   useEffect(() => {
     loadEmergency()
     // Refresh emergency data every 10 seconds (reduced from 5s to prevent excessive re-renders)
@@ -138,12 +209,31 @@ function EmergencyActive() {
     if (!emergency || !id || !currentUserId) return
     if (locationSharedRef.current) return // Already shared location
     
+    // Skip automatic location sharing on HTTP - browsers completely block it
+    // Users must use the manual "Share Location" button instead
+    const isHttp = window.location.protocol === 'http:' && window.location.hostname !== 'localhost'
+    
+    if (isHttp) {
+      // On HTTP, skip automatic location sharing entirely
+      // The manual button will be shown instead
+      if (import.meta.env.DEV) {
+        console.log('⚠️ Skipping automatic geolocation on HTTP (blocked by browser security policy)')
+        console.log('💡 Users can use the "Share Location" button, but it may also be blocked on HTTP')
+      }
+      return
+    }
+    
+    const isSender = emergency && String(emergency.user_id) === String(currentUserId)
+    
     // Check if user's location already exists in locations array
     const userLocation = locations.find(loc => String(loc.user_id) === String(currentUserId))
     
     // If location doesn't exist, share it once
     if (!userLocation && navigator.geolocation) {
       locationSharedRef.current = true // Mark as shared to prevent duplicates
+      
+      // Capture variables in closure for error handler
+      const senderCheck = isSender
       
       navigator.geolocation.getCurrentPosition(
         async (position) => {
@@ -152,25 +242,55 @@ function EmergencyActive() {
               latitude: position.coords.latitude,
               longitude: position.coords.longitude,
             })
+            // Always log location sharing (critical for debugging)
             console.log('✅ Location shared once:', {
               lat: position.coords.latitude,
               lng: position.coords.longitude,
-              userId: currentUserId
+              userId: currentUserId,
+              emergencyId: id,
+              isSender: senderCheck
             })
             // Reload emergency data to update map
             setTimeout(() => {
               loadEmergency()
             }, 1000)
           } catch (err) {
-            console.error('❌ Failed to share location:', err)
-            locationSharedRef.current = false // Reset on error so user can try again
+            // Always log location sharing failures (critical for debugging)
+            console.error('❌ Failed to share location:', {
+              error: err,
+              userId: currentUserId,
+              emergencyId: id,
+              isSender: senderCheck,
+              message: (err as any)?.response?.data?.error || (err as any)?.message
+            })
+            // Don't reset locationSharedRef on API error - location was obtained, just failed to send
+            // This prevents infinite retry loop
           }
         },
         (err) => {
-          console.error('❌ Location error:', err)
-          locationSharedRef.current = false // Reset on error
+          // Always log geolocation errors (critical for debugging)
+          console.error('❌ Location error:', {
+            code: err.code,
+            message: err.message,
+            userId: currentUserId,
+            emergencyId: id,
+            isSender: senderCheck,
+          })
+          // CRITICAL: Don't reset locationSharedRef on permission denied (code 1)
+          // This prevents infinite retry loop on HTTP/iPhone
+          // Only reset on other errors (timeout, unavailable)
           if (err.code === 1) {
-            console.warn('⚠️ Location permission denied. Please enable location access.')
+            // Permission denied - don't retry (especially on HTTP/iPhone)
+            // Mark as shared to prevent retry loop
+            locationSharedRef.current = true
+            console.warn('⚠️ Location permission denied. Skipping automatic location sharing.', {
+              userId: currentUserId,
+              isSender: senderCheck,
+            })
+            console.info('💡 Tip: Geolocation requires HTTPS (or localhost). Use HTTPS or enable location manually.')
+          } else {
+            // Other errors (timeout, unavailable) - allow retry
+            locationSharedRef.current = false
           }
         },
         {
@@ -233,11 +353,11 @@ function EmergencyActive() {
       // Process locations with validation
       const locationsData = response.data.locations || []
       
-      // Validate and filter locations
+      // Validate and filter locations using unified coordinate parsing
       const validLocations = locationsData.filter((loc: Location) => {
         if (!loc || !loc.user_id) return false
-        const lat = parseFloat(loc.latitude?.toString() || '')
-        const lng = parseFloat(loc.longitude?.toString() || '')
+        const lat = parseCoordinate(loc.latitude)
+        const lng = parseCoordinate(loc.longitude)
         return !isNaN(lat) && !isNaN(lng) && 
                lat >= -90 && lat <= 90 && 
                lng >= -180 && lng <= 180
@@ -259,19 +379,19 @@ function EmergencyActive() {
         
         setLocations(uniqueLocations)
         
-        // Center map on midpoint of all locations
+        // Center map on midpoint of all locations using unified coordinate parsing
         if (uniqueLocations.length > 1) {
           const avgLat = uniqueLocations.reduce((sum: number, loc: Location) => 
-            sum + parseFloat(loc.latitude.toString()), 0) / uniqueLocations.length
+            sum + parseCoordinate(loc.latitude), 0) / uniqueLocations.length
           const avgLng = uniqueLocations.reduce((sum: number, loc: Location) => 
-            sum + parseFloat(loc.longitude.toString()), 0) / uniqueLocations.length
+            sum + parseCoordinate(loc.longitude), 0) / uniqueLocations.length
           setMapCenter({ lat: avgLat, lng: avgLng })
         } else {
-          // Single location - center on it
+          // Single location - center on it using unified coordinate parsing
           const loc = uniqueLocations[0]
           setMapCenter({
-            lat: parseFloat(loc.latitude.toString()),
-            lng: parseFloat(loc.longitude.toString()),
+            lat: parseCoordinate(loc.latitude),
+            lng: parseCoordinate(loc.longitude),
           })
         }
       } else {
@@ -280,7 +400,10 @@ function EmergencyActive() {
         setSenderLocation(null)
       }
     } catch (err: any) {
-      console.error('Failed to load emergency:', err)
+      // Only log errors in development or for critical failures
+      if (import.meta.env.DEV || retryCount === 0) {
+        console.error('Failed to load emergency:', err)
+      }
       
       // Handle specific error cases
       if (err.response?.status === 404) {
@@ -296,7 +419,10 @@ function EmergencyActive() {
         if (retryCount < MAX_RETRIES) {
           // Exponential backoff: delay doubles each retry (100ms, 200ms, 400ms, capped at 5000ms)
           const delay = Math.min(INITIAL_DELAY * Math.pow(2, retryCount), MAX_DELAY)
-          console.log(`Server error. Retrying in ${delay}ms... (${retryCount + 1}/${MAX_RETRIES})`)
+          // Only log retries in development
+          if (import.meta.env.DEV) {
+            console.log(`Server error. Retrying in ${delay}ms... (${retryCount + 1}/${MAX_RETRIES})`)
+          }
           setTimeout(() => loadEmergency(retryCount + 1), delay)
           return
         } else {
@@ -308,7 +434,10 @@ function EmergencyActive() {
         if (retryCount < MAX_RETRIES) {
           // Exponential backoff: delay doubles each retry (100ms, 200ms, 400ms, capped at 5000ms)
           const delay = Math.min(INITIAL_DELAY * Math.pow(2, retryCount), MAX_DELAY)
-          console.log(`Connection timeout. Retrying in ${delay}ms... (${retryCount + 1}/${MAX_RETRIES})`)
+          // Only log retries in development
+          if (import.meta.env.DEV) {
+            console.log(`Connection timeout. Retrying in ${delay}ms... (${retryCount + 1}/${MAX_RETRIES})`)
+          }
           setTimeout(() => loadEmergency(retryCount + 1), delay)
           return
         } else {
@@ -328,46 +457,92 @@ function EmergencyActive() {
    * Sets map reference and marks map as loaded after initialization
    */
   const onMapLoad = useCallback((map: google.maps.Map) => {
-    if (!map) {
-      return
-    }
-    
-    // Ensure Google Maps API is available
-    if (typeof window === 'undefined' || !(window as any).google?.maps) {
-      // Retry after a short delay
-      setTimeout(() => {
-        if ((window as any).google?.maps && map) {
-          mapRef.current = map
-          setTimeout(() => {
-            if (mapRef.current === map && mapRef.current.getDiv()) {
-              setMapLoaded(true)
-            } else {
-              console.warn('⚠️ Map instance changed or invalid during retry initialization')
-            }
-          }, 500)
-        }
-      }, 200)
-      return
-    }
-    
-    // Set map reference and mark as loaded after a delay to ensure initialization
-    mapRef.current = map
-    
-    // Verify map instance is valid
-    if (!mapRef.current.getDiv()) {
-      console.warn('⚠️ Map instance does not have a valid div element')
-      return
-    }
-    
-    setTimeout(() => {
-      if (mapRef.current === map && mapRef.current.getDiv()) {
-        setMapLoaded(true)
-      } else {
-        console.warn('⚠️ Map instance changed or invalid during initialization')
+    try {
+      if (!map) {
+        return
       }
-    }, 500)
+      
+      // Ensure Google Maps API is available
+      if (typeof window === 'undefined' || !(window as any).google?.maps) {
+        // Retry after a short delay
+        setTimeout(() => {
+          try {
+            if ((window as any).google?.maps && map && map.getDiv && map.getDiv()) {
+              mapRef.current = map
+              setTimeout(() => {
+                try {
+                  if (mapRef.current === map && mapRef.current && mapRef.current.getDiv && mapRef.current.getDiv()) {
+                    setMapLoaded(true)
+                  } else {
+                    console.warn('⚠️ Map instance changed or invalid during retry initialization')
+                  }
+                } catch (err) {
+                  console.error('❌ Error checking map during retry:', err)
+                }
+              }, 500)
+            }
+          } catch (err) {
+            console.error('❌ Error in map retry initialization:', err)
+          }
+        }, 200)
+        return
+      }
+      
+      // Verify map has required methods before using it
+      if (!map.getDiv || typeof map.getDiv !== 'function') {
+        console.warn('⚠️ Map instance does not have getDiv method')
+        return
+      }
+      
+      // Set map reference and mark as loaded after a delay to ensure initialization
+      mapRef.current = map
+      
+      // Verify map instance is valid
+      try {
+        const div = map.getDiv()
+        if (!div) {
+          console.warn('⚠️ Map instance does not have a valid div element')
+          return
+        }
+      } catch (err) {
+        console.error('❌ Error checking map div:', err)
+        return
+      }
+      
+      setTimeout(() => {
+        try {
+          if (mapRef.current === map && mapRef.current && mapRef.current.getDiv && mapRef.current.getDiv()) {
+            setMapLoaded(true)
+          } else {
+            console.warn('⚠️ Map instance changed or invalid during initialization')
+          }
+        } catch (err) {
+          console.error('❌ Error in map initialization timeout:', err)
+        }
+      }, 500)
+    } catch (err) {
+      console.error('❌ Error in onMapLoad:', err)
+    }
   }, [])
   
+
+  /**
+   * Unified coordinate parsing function
+   * Ensures consistent parsing from database (DECIMAL) to JavaScript number
+   * Database stores: DECIMAL(10,8) for latitude, DECIMAL(11,8) for longitude
+   * This function handles both string and number types from API responses
+   */
+  const parseCoordinate = (coord: string | number | null | undefined): number => {
+    if (coord === null || coord === undefined) {
+      return NaN
+    }
+    // Handle string types (from database DECIMAL)
+    if (typeof coord === 'string') {
+      return parseFloat(coord)
+    }
+    // Handle number types
+    return Number(coord)
+  }
 
   /**
    * Get marker icon based on location type
@@ -439,18 +614,24 @@ function EmergencyActive() {
   }
 
   /**
-   * Format coordinate with optimal precision for Google Maps URLs
-   * 6 decimal places = ~10cm accuracy (sufficient and more reliable for Google Maps)
-   * 8 decimal places can sometimes cause issues with Google Maps URL parsing
+   * Format coordinate with precision matching database storage
+   * Database stores: DECIMAL(10,8) for latitude, DECIMAL(11,8) for longitude
+   * Using 8 decimal places ensures exact match between database, map markers, and Google Maps URLs
+   * According to Google Maps documentation, coordinates should be URL-encoded with comma as %2C
    */
   const formatCoordinate = (coord: number): string => {
-    // Use 6 decimal places for Google Maps URLs (more reliable than 8)
-    // This provides ~10cm accuracy which is more than sufficient
-    return coord.toFixed(6)
+    if (isNaN(coord)) {
+      return '0'
+    }
+    // Use 8 decimal places to match database precision exactly
+    // This ensures map markers and Google Maps URLs use identical coordinates
+    return coord.toFixed(8)
   }
 
   /**
    * Generate Google Maps navigation URL using exact coordinates
+   * On mobile, use "My Location" as origin so Google Maps uses device GPS
+   * On desktop, use exact coordinates from locations array
    * This ensures Google Maps uses GPS coordinates directly, not geocoded addresses
    * Using coordinates directly prevents the "same location" error when both places
    * geocode to the same district (e.g., "Haidian District, Beijing, China")
@@ -462,37 +643,60 @@ function EmergencyActive() {
     destLng: number
   ): string => {
     try {
-      // Validate coordinates before building URL
-      if (isNaN(originLat) || isNaN(originLng) || isNaN(destLat) || isNaN(destLng)) {
-        throw new Error('Invalid coordinates provided to getGoogleMapsUrl')
+      // Validate destination coordinates before building URL
+      if (isNaN(destLat) || isNaN(destLng)) {
+        throw new Error('Invalid destination coordinates provided to getGoogleMapsUrl')
       }
       
-      // Format coordinates with 6 decimal places (optimal precision)
-      const originCoords = `${formatCoordinate(originLat)},${formatCoordinate(originLng)}`
+      // Format destination coordinates with 8 decimal places (matching database precision)
+      // According to Google Maps documentation, coordinates should be comma-separated and URL-encoded
+      // encodeURIComponent() will encode the comma as %2C, which is correct per documentation
       const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
-      
-      // Check if origin and destination are the same (or very close)
-      // Calculate distance in degrees (rough approximation)
-      const latDiff = Math.abs(originLat - destLat)
-      const lngDiff = Math.abs(originLng - destLng)
-      const distance = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff)
-      
-      // If locations are identical or extremely close (< 0.0001 degrees ≈ 11 meters), just show destination
-      if (distance < 0.0001) {
-        const encodedDest = encodeURIComponent(destCoords)
-        return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
-      }
-      
-      // Use the most reliable format for directions with exact coordinates
-      // Key elements:
-      // 1. Use coordinates directly (not place_id) to avoid geocoding to districts
-      // 2. Use 'dir_action=navigate' to force navigation mode
-      // 3. URL-encode coordinates for safety (following Google Maps Platform best practices)
-      //    Note: Numeric coordinates are safe unencoded, but encoding is defensive
-      // This format forces Google Maps to treat them as GPS coordinates, not addresses
-      const encodedOrigin = encodeURIComponent(originCoords)
       const encodedDest = encodeURIComponent(destCoords)
-      return `https://www.google.com/maps/dir/?api=1&origin=${encodedOrigin}&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+      
+      // Detect mobile device
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+      
+      if (isMobile) {
+        // On mobile: Send only destination - Google Maps automatically uses device GPS for origin
+        // This ensures accurate directions from user's actual current location
+        // Google Maps will automatically detect device GPS and use it as origin
+        // CRITICAL: URL-encode destination coordinates per Google Maps Platform requirements
+        // encodeURIComponent() encodes comma (,) as %2C, which matches Google Maps documentation
+        // Using 8 decimal places ensures exact match with database and map markers
+        return `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+      } else {
+        // On desktop: Use exact coordinates from locations array
+        // Validate origin coordinates
+        if (isNaN(originLat) || isNaN(originLng)) {
+          // Fallback to destination only if origin invalid
+          return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+        }
+        
+        // Format coordinates with 8 decimal places (matching database precision)
+        const originCoords = `${formatCoordinate(originLat)},${formatCoordinate(originLng)}`
+        
+        // Check if origin and destination are the same (or very close)
+        // Calculate distance in degrees (rough approximation)
+        const latDiff = Math.abs(originLat - destLat)
+        const lngDiff = Math.abs(originLng - destLng)
+        const distance = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff)
+        
+        // If locations are identical or extremely close (< 0.0001 degrees ≈ 11 meters), just show destination
+        if (distance < 0.0001) {
+          return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+        }
+        
+        // Use the most reliable format for directions with exact coordinates
+        // Key elements:
+        // 1. Use coordinates directly (not place_id) to avoid geocoding to districts
+        // 2. Use 'dir_action=navigate' to force navigation mode
+        // 3. URL-encode coordinates - encodeURIComponent() encodes comma as %2C per documentation
+        // 4. Using 8 decimal places ensures exact match with database and map markers
+        // This format forces Google Maps to treat them as GPS coordinates, not addresses
+        const encodedOrigin = encodeURIComponent(originCoords)
+        return `https://www.google.com/maps/dir/?api=1&origin=${encodedOrigin}&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+      }
       
     } catch (error) {
       console.error('Error generating Google Maps URL:', error)
@@ -705,6 +909,8 @@ function EmergencyActive() {
       setGoogleMapsUrlLoading(true)
       try {
         // Find sender location from locations array (same as what's shown on map)
+        // CRITICAL: Use the EXACT same location object and parsing method as map markers
+        // This ensures map marker and URL use identical coordinates
         const senderLoc = locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(emergency.user_id))
         
         if (!senderLoc) {
@@ -713,18 +919,58 @@ function EmergencyActive() {
           return
         }
 
-        // Parse coordinates exactly the same way as map markers do
-        const destLat = parseFloat(senderLoc.latitude.toString())
-        const destLng = parseFloat(senderLoc.longitude.toString())
+        // Parse coordinates using unified function - MUST match map markers exactly
+        // This ensures Google Maps URL uses identical coordinates as map markers
+        const destLat = parseCoordinate(senderLoc.latitude)
+        const destLng = parseCoordinate(senderLoc.longitude)
         
         // Validate destination coordinates
         if (isNaN(destLat) || isNaN(destLng) || 
             destLat < -90 || destLat > 90 || 
             destLng < -180 || destLng > 180) {
+          console.error('Invalid destination coordinates:', { destLat, destLng, rawDestLat, rawDestLng, senderLoc })
           setGoogleMapsUrl(null)
           setGoogleMapsUrlLoading(false)
           return
         }
+        
+        // Debug: Log coordinates to verify they match map markers
+        // Always log for debugging location issues
+        const formattedDestLat = formatCoordinate(destLat)
+        const formattedDestLng = formatCoordinate(destLng)
+        console.log('🔗 Google Maps URL Coordinates (Destination):', {
+          raw: { lat: senderLoc.latitude, lng: senderLoc.longitude },
+          parsed: { lat: destLat, lng: destLng },
+          formatted: { lat: formattedDestLat, lng: formattedDestLng },
+          urlFormat: `${formattedDestLat},${formattedDestLng}`,
+          databasePrecision: '8 decimal places (DECIMAL(10,8) and DECIMAL(11,8))'
+        })
+        
+        // Verify coordinates match map marker coordinates
+        const senderLocForComparison = locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(emergency.user_id))
+        if (senderLocForComparison) {
+          // Use unified parsing for comparison
+          const mapMarkerLat = parseCoordinate(senderLocForComparison.latitude)
+          const mapMarkerLng = parseCoordinate(senderLocForComparison.longitude)
+          
+          const coordsMatch = Math.abs(mapMarkerLat - destLat) < 0.0000001 && Math.abs(mapMarkerLng - destLng) < 0.0000001
+          if (!coordsMatch) {
+            console.warn('⚠️ COORDINATE MISMATCH:', {
+              mapMarker: { lat: mapMarkerLat, lng: mapMarkerLng },
+              urlDestination: { lat: destLat, lng: destLng },
+              difference: { lat: Math.abs(mapMarkerLat - destLat), lng: Math.abs(mapMarkerLng - destLng) },
+              formatted: {
+                mapMarker: `${formatCoordinate(mapMarkerLat)},${formatCoordinate(mapMarkerLng)}`,
+                urlDestination: `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+              }
+            })
+          } else {
+            console.log('✅ Coordinates match between map marker and URL')
+          }
+        }
+        
+        // Detect mobile device
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
         
         // Find responder location (current user) from locations array (optional)
         const responderLoc = currentUserId 
@@ -734,24 +980,55 @@ function EmergencyActive() {
         let url: string
         
         if (responderLoc) {
-          const originLat = parseFloat(responderLoc.latitude.toString())
-          const originLng = parseFloat(responderLoc.longitude.toString())
+          // Parse origin coordinates using unified function - matches destination parsing
+          const originLat = parseCoordinate(responderLoc.latitude)
+          const originLng = parseCoordinate(responderLoc.longitude)
           
           // Validate origin coordinates
           if (!isNaN(originLat) && !isNaN(originLng) &&
               originLat >= -90 && originLat <= 90 &&
               originLng >= -180 && originLng <= 180) {
-            // Use both origin and destination coordinates directly (no place_id lookup)
+            // Always use getGoogleMapsUrl - it will handle mobile vs desktop automatically
+            // On mobile, it uses "My Location", on desktop it uses exact coordinates
             url = getGoogleMapsUrl(originLat, originLng, destLat, destLng)
+            
+            // Debug: Log full URL generation details
+            if (import.meta.env.DEV) {
+              console.log('🔗 Google Maps URL Generated:', {
+                origin: { lat: originLat, lng: originLng },
+                destination: { lat: destLat, lng: destLng },
+                url: url
+              })
+            }
           } else {
-            // Fallback to destination only
-            const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
-            url = `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+            // Invalid origin coordinates
+            if (isMobile) {
+              // On mobile: Send only destination - Google Maps automatically uses device GPS
+              // CRITICAL: URL-encode destination coordinates per Google Maps Platform requirements
+              const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+              const encodedDest = encodeURIComponent(destCoords)
+              url = `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+            } else {
+              // On desktop: Fallback to destination only
+              const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+              const encodedDest = encodeURIComponent(destCoords)
+              url = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+            }
           }
         } else {
-          // Responder location not available yet - use destination only
-          const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
-          url = `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+          // Responder location not available yet
+          if (isMobile) {
+            // On mobile: Send only destination - Google Maps automatically uses device GPS for origin
+            // CRITICAL: URL-encode destination coordinates per Google Maps Platform requirements
+            const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+            const encodedDest = encodeURIComponent(destCoords)
+            url = `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+          } else {
+            // On desktop: Use destination only
+            const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+            const encodedDest = encodeURIComponent(destCoords)
+            url = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+          }
         }
         
         // Validate URL
@@ -769,7 +1046,7 @@ function EmergencyActive() {
     }
 
     generateUrl()
-  }, [isSender, emergency?.user_id, locations, currentUserId, formatCoordinate, getGoogleMapsUrl])
+  }, [isSender, emergency?.user_id, locations, currentUserId])
 
   // Google Maps button - MUST be before early return to follow Rules of Hooks
   const googleMapsButton = useMemo(() => {
@@ -789,7 +1066,10 @@ function EmergencyActive() {
           textAlign: 'center',
           color: '#4A6FA5' /* Darker blue text for contrast */
         }}>
-          <p style={{ margin: 0 }}>⏳ Waiting for emergency location data...</p>
+          <p style={{ margin: 0, marginBottom: '0.5rem' }}>⏳ Waiting for emergency location data...</p>
+          <p style={{ margin: 0, fontSize: '0.85rem', color: '#666' }}>
+            The sender needs to share their location. If they're on HTTP, they should use the "Share Location" button.
+          </p>
         </div>
       )
     }
@@ -1101,16 +1381,16 @@ function EmergencyActive() {
                   return null
                 }
                 
-                // Parse coordinates - MUST use same method as Google Maps URL generation
+                // Parse coordinates using unified function - MUST match Google Maps URL generation exactly
                 // This ensures map markers and directions URL use identical coordinates
-                const lat = parseFloat(location.latitude.toString())
-                const lng = parseFloat(location.longitude.toString())
+                const lat = parseCoordinate(location.latitude)
+                const lng = parseCoordinate(location.longitude)
                 
                 // Validate coordinate ranges
                 if (isNaN(lat) || isNaN(lng) || 
                     lat < -90 || lat > 90 || 
                     lng < -180 || lng > 180) {
-                  console.warn('Invalid coordinates:', { lat, lng, location })
+                  console.warn('Invalid coordinates:', { lat, lng, location, rawLat, rawLng })
                   return null
                 }
                 
@@ -1122,10 +1402,25 @@ function EmergencyActive() {
                   ? String(location.user_id) === String(currentUserId) 
                   : false
                 
-                // Use exact coordinates for all markers (no offset)
+                // Use exact coordinates for all markers (no offset, no rounding)
                 // These coordinates MUST match what's sent to Google Maps directions URL
+                // Store as numbers to ensure precision is maintained
                 const markerLat = lat
                 const markerLng = lng
+                
+                // Debug: Log coordinates to verify they match URL generation
+                // Always log sender location for debugging
+                if (isSenderLocation) {
+                  const formattedLat = formatCoordinate(markerLat)
+                  const formattedLng = formatCoordinate(markerLng)
+                  console.log('📍 Map Marker Coordinates (Sender):', {
+                    raw: { lat: location.latitude, lng: location.longitude },
+                    parsed: { lat: markerLat, lng: markerLng },
+                    formatted: { lat: formattedLat, lng: formattedLng },
+                    urlFormat: `${formattedLat},${formattedLng}`,
+                    databasePrecision: '8 decimal places (DECIMAL(10,8) and DECIMAL(11,8))'
+                  })
+                }
                 
                 // Double-check Google Maps is available and map is ready before rendering Marker
                 if (typeof window === 'undefined' || !(window as any).google?.maps?.Marker || !mapRef.current) {
@@ -1133,6 +1428,11 @@ function EmergencyActive() {
                 }
                 
                 try {
+                  // Verify map is still valid before rendering marker
+                  if (!mapRef.current || !mapRef.current.getDiv || typeof mapRef.current.getDiv !== 'function') {
+                    return null
+                  }
+                  
                   // Get icon - sender uses default red pin (undefined), receiver uses blue dot
                   const markerIcon = isSenderLocation ? undefined : getMarkerIcon(false)
                   
@@ -1150,15 +1450,15 @@ function EmergencyActive() {
                         fontWeight: 'bold'
                       } : undefined}
                     >
-                      {selectedLocation?.user_id === location.user_id && (() => {
+                      {selectedLocation?.user_id === location.user_id && mapRef.current && (() => {
                         // Calculate distance to other location
                         let distanceText = ''
                         if (isSenderLocation && !isSender) {
                           // Responder viewing sender location - show distance from responder to sender
                           const responderLoc = locations.find(loc => String(loc.user_id) === String(currentUserId))
                           if (responderLoc) {
-                            const responderLat = parseFloat(responderLoc.latitude.toString())
-                            const responderLng = parseFloat(responderLoc.longitude.toString())
+                            const responderLat = parseCoordinate(responderLoc.latitude)
+                            const responderLng = parseCoordinate(responderLoc.longitude)
                             const distance = calculateDistance(responderLat, responderLng, lat, lng)
                             distanceText = formatDistance(distance)
                           }
@@ -1166,8 +1466,8 @@ function EmergencyActive() {
                           // Sender viewing responder location - show distance from sender to responder
                           const senderLoc = locations.find(loc => String(loc.user_id) === String(emergency.user_id))
                           if (senderLoc) {
-                            const senderLat = parseFloat(senderLoc.latitude.toString())
-                            const senderLng = parseFloat(senderLoc.longitude.toString())
+                            const senderLat = parseCoordinate(senderLoc.latitude)
+                            const senderLng = parseCoordinate(senderLoc.longitude)
                             const distance = calculateDistance(senderLat, senderLng, lat, lng)
                             distanceText = formatDistance(distance)
                           }
@@ -1175,8 +1475,8 @@ function EmergencyActive() {
                           // Responder viewing another responder location - show distance from current responder
                           const currentLoc = locations.find(loc => String(loc.user_id) === String(currentUserId))
                           if (currentLoc) {
-                            const currentLat = parseFloat(currentLoc.latitude.toString())
-                            const currentLng = parseFloat(currentLoc.longitude.toString())
+                            const currentLat = parseCoordinate(currentLoc.latitude)
+                            const currentLng = parseCoordinate(currentLoc.longitude)
                             const distance = calculateDistance(currentLat, currentLng, lat, lng)
                             distanceText = formatDistance(distance)
                           }

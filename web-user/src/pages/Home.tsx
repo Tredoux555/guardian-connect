@@ -6,20 +6,23 @@ import {
   showEmergencyNotification, 
   wakeScreen 
 } from '../services/notifications'
+import { getCurrentUserId } from '../utils/jwt'
 import { FEATURES } from '../utils/featureFlags'
 import './Home.css'
 
 function Home() {
   const navigate = useNavigate()
   
-  // Debug: Log feature flags (remove after testing)
+  // Debug: Log feature flags (only in development)
   useEffect(() => {
-    console.log('🔍 Feature Flags Status:', {
-      donations: FEATURES.donations,
-      subscriptions: FEATURES.subscriptions,
-      envDonations: import.meta.env.VITE_ENABLE_DONATIONS,
-      envSubscriptions: import.meta.env.VITE_ENABLE_SUBSCRIPTIONS,
-    })
+    if (import.meta.env.DEV) {
+      console.log('🔍 Feature Flags Status:', {
+        donations: FEATURES.donations,
+        subscriptions: FEATURES.subscriptions,
+        envDonations: import.meta.env.VITE_ENABLE_DONATIONS,
+        envSubscriptions: import.meta.env.VITE_ENABLE_SUBSCRIPTIONS,
+      })
+    }
   }, [])
   const [activeEmergency, setActiveEmergency] = useState<any>(null)
   const [loading, setLoading] = useState(false)
@@ -88,12 +91,27 @@ function Home() {
     const socket = connectSocket(token)
     
     const handleEmergencyCreated = async (data: any) => {
-      console.log('🚨 Emergency created event received:', data)
+      // Only log in development
+      if (import.meta.env.DEV) {
+        console.log('🚨 Emergency created event received:', data)
+      }
+      
+      // Get current user ID
+      const currentUserId = getCurrentUserId()
+      
+      // CRITICAL: Don't play sound/navigate if user is the sender
+      // Sender should not receive their own emergency notification
+      if (currentUserId && data.userId && String(currentUserId) === String(data.userId)) {
+        if (import.meta.env.DEV) {
+          console.log('⚠️ User is the sender - skipping notification and sound')
+        }
+        return
+      }
       
       const emergencyId = data.emergencyId
       const senderName = data.senderName || data.userEmail || 'Someone'
       
-      // Show loud notification with sound
+      // Show loud notification with sound (only for receivers, not sender)
       await showEmergencyNotification(
         '🚨 Emergency Alert',
         `${senderName} needs help!`,
@@ -104,12 +122,18 @@ function Home() {
       // Wake screen
       await wakeScreen()
       
+      // Sound should already be playing from showEmergencyNotification
+      // But ensure it's playing (user may have interacted with page already)
+      // The notification click will also trigger sound if needed
+      
       // DON'T try to share location here - user must accept emergency first
       // Location will be shared automatically when user clicks "I CAN HELP" 
       // on the EmergencyResponse page (which already handles this correctly)
       
-      // Navigate to emergency response page
-      navigate(`/respond/${emergencyId}`)
+      // Navigate to emergency response page after a short delay to let sound start
+      setTimeout(() => {
+        navigate(`/respond/${emergencyId}`)
+      }, 500) // Small delay to ensure sound starts
     }
 
     // Wait for socket to connect, then listen
@@ -179,11 +203,16 @@ function Home() {
       setActiveEmergency(response.data.emergency)
       
       // Share location when emergency is created, then navigate
-      // Improved with timeout, better error handling, and longer wait for mobile
-      if (navigator.geolocation) {
+      // Skip automatic location sharing on HTTP - browsers block it
+      // Users can share location manually on EmergencyActive page
+      const isHttp = window.location.protocol === 'http:' && window.location.hostname !== 'localhost'
+      
+      if (navigator.geolocation && !isHttp) {
         await new Promise<void>((resolve) => {
           const timeout = setTimeout(() => {
-            console.warn('⚠️ Location request timed out, navigating anyway')
+            if (import.meta.env.DEV) {
+              console.warn('⚠️ Location request timed out, navigating anyway')
+            }
             resolve()
           }, 8000) // 8 second timeout for mobile
           
@@ -195,15 +224,22 @@ function Home() {
                   latitude: position.coords.latitude,
                   longitude: position.coords.longitude,
                 })
+                // Always log location sharing success (critical for debugging)
                 console.log('✅ Sender location shared successfully:', {
                   lat: position.coords.latitude,
                   lng: position.coords.longitude,
-                  response: locationResponse.status
+                  response: locationResponse.status,
+                  emergencyId: emergencyId
                 })
                 // Longer delay on mobile to ensure location is saved to database
                 setTimeout(() => resolve(), 1500)
               } catch (err: any) {
-                console.error('❌ Failed to share initial location:', err)
+                // Always log location sharing failures (critical for debugging)
+                console.error('❌ Failed to share initial location:', {
+                  error: err,
+                  emergencyId: emergencyId,
+                  message: err.response?.data?.error || err.message
+                })
                 // Still navigate even if location sharing fails
                 // EmergencyActive will try to share location again
                 resolve()
@@ -211,10 +247,15 @@ function Home() {
             },
             (err) => {
               clearTimeout(timeout)
-              console.error('❌ Location error:', err)
+              // Only log in development
+              if (import.meta.env.DEV) {
+                console.error('❌ Location error:', err)
+              }
               // Show user-friendly message for permission denial
               if (err.code === 1) {
-                console.warn('⚠️ Location permission denied. Emergency created but location not shared.')
+                if (import.meta.env.DEV) {
+                  console.warn('⚠️ Location permission denied. Emergency created but location not shared.')
+                }
                 // Don't block navigation - EmergencyActive will try again
               }
               resolve() // Continue navigation even if location fails
@@ -226,8 +267,15 @@ function Home() {
             }
           )
         })
+      } else if (isHttp) {
+        // On HTTP, skip location sharing - EmergencyActive page will show manual button
+        if (import.meta.env.DEV) {
+          console.log('⚠️ Skipping location sharing on HTTP (blocked by browser). Use manual button on EmergencyActive page.')
+        }
       } else {
-        console.warn('⚠️ Geolocation not supported in this browser')
+        if (import.meta.env.DEV) {
+          console.warn('⚠️ Geolocation not supported in this browser')
+        }
       }
       
       navigate(`/emergency/${emergencyId}`)

@@ -7,7 +7,32 @@ export const connectSocket = (token: string): Socket => {
     return socket
   }
 
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
+  // Auto-detect API URL (same logic as api.ts)
+  const getApiBaseUrl = (): string => {
+    // Use explicit VITE_API_URL if set (and not localhost)
+    if (import.meta.env.VITE_API_URL && !import.meta.env.VITE_API_URL.includes('localhost')) {
+      return import.meta.env.VITE_API_URL;
+    }
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+    const networkIP = '192.168.1.3'; // Server's network IP
+    
+    // If accessed via ngrok (HTTPS), backend is still on network IP (HTTP)
+    if (hostname.includes('.ngrok.io') || hostname.includes('.ngrok-free.app') || hostname.includes('.ngrok.app')) {
+      // Frontend is HTTPS via ngrok, but backend is still HTTP on network
+      return `http://${networkIP}:3001/api`;
+    }
+    
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+      // If accessing from phone's IP, use server's IP for backend
+      if (hostname === '192.168.1.14') {
+        return `${protocol}//${networkIP}:3001/api`;
+      }
+      return `${protocol}//${hostname}:3001/api`;
+    }
+    return 'http://localhost:3001/api';
+  };
+  const API_BASE_URL = getApiBaseUrl();
   const socketUrl = API_BASE_URL.replace('/api', '')
 
   socket = io(socketUrl, {
@@ -25,32 +50,45 @@ export const connectSocket = (token: string): Socket => {
   })
 
   socket.on('connect', () => {
-    console.log('✅ Socket.io connected successfully')
+    // Only log in development
+    if (import.meta.env.DEV) {
+      console.log('✅ Socket.io connected successfully')
+    }
   })
 
   socket.on('disconnect', (reason) => {
-    console.log('❌ Socket.io disconnected:', reason)
+    // Only log in development
+    if (import.meta.env.DEV) {
+      console.log('❌ Socket.io disconnected:', reason)
+    }
   })
 
   socket.on('reconnect', (attemptNumber) => {
-    console.log(`🔄 Socket.io reconnected after ${attemptNumber} attempts`)
+    // Only log in development
+    if (import.meta.env.DEV) {
+      console.log(`🔄 Socket.io reconnected after ${attemptNumber} attempts`)
+    }
   })
 
   socket.on('reconnect_attempt', () => {
-    console.log('🔄 Attempting to reconnect socket...')
+    // Don't log reconnect attempts - too noisy
   })
 
   socket.on('reconnect_error', (error) => {
-    console.error('❌ Socket reconnection error:', error)
+    // Only log in development
+    if (import.meta.env.DEV) {
+      console.error('❌ Socket reconnection error:', error)
+    }
   })
 
   socket.on('reconnect_failed', () => {
+    // Always log critical failures
     console.error('❌ Socket reconnection failed - manual intervention may be required')
   })
 
   socket.on('connect_error', (error) => {
-    // Only log if it's a real error, not just connection retry
-    if (error.message && !error.message.includes('xhr poll error')) {
+    // Only log if it's a real error, not just connection retry, and only in development
+    if (import.meta.env.DEV && error.message && !error.message.includes('xhr poll error')) {
       console.error('Socket connection error:', error)
     }
   })
@@ -67,14 +105,19 @@ export const disconnectSocket = () => {
 
 export const joinEmergency = (emergencyId: string) => {
   if (!socket) {
-    console.warn('Socket not initialized. Cannot join emergency room.')
+    if (import.meta.env.DEV) {
+      console.warn('Socket not initialized. Cannot join emergency room.')
+    }
     return
   }
 
   const doJoin = () => {
     if (socket?.connected) {
       socket.emit('join_emergency', emergencyId)
-      console.log(`Joined emergency room: ${emergencyId}`)
+      // Only log in development
+      if (import.meta.env.DEV) {
+        console.log(`Joined emergency room: ${emergencyId}`)
+      }
     }
   }
 

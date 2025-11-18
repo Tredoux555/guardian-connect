@@ -120,6 +120,23 @@ export class Emergency {
        ORDER BY el.user_id, el.timestamp DESC`,
       [emergencyId]
     );
+    
+    // Log retrieved locations for debugging
+    if (result.rows.length > 0) {
+      console.log('📍 Locations retrieved from database:', {
+        emergencyId,
+        count: result.rows.length,
+        locations: result.rows.map((row: any) => ({
+          userId: row.user_id,
+          latitude: row.latitude,
+          longitude: row.longitude,
+          latitudeType: typeof row.latitude,
+          longitudeType: typeof row.longitude,
+          timestamp: row.timestamp
+        }))
+      });
+    }
+    
     return result.rows;
   }
 }
