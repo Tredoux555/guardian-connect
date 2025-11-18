@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js",
-    "migrate": "node dist/migrations/run.js"
+    "start": "node dist/src/server.js",
+    "migrate": "node dist/src/database/migrations/run.js"
   },
   "keywords": [],
   "author": "",
