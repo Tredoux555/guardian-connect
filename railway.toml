@@ -1,0 +1,10 @@
+# Railway configuration for monorepo
+# This file helps Railway understand the project structure
+
+[build]
+builder = "NIXPACKS"
+
+# Note: Deploy backend and web-user as separate services
+# Each service should have its root directory set in Railway dashboard:
+# - Backend: Root Directory = "backend"
+# - Frontend: Root Directory = "web-user"
