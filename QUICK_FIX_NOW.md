@@ -1,39 +1,79 @@
 # Quick Fix - Do This Right Now
 
 ## The Problem
-Your backend service is crashing because Railway is using old code.
+Your backend service is crashing because Railway is using old code. After renaming the service, Railway lost connection to GitHub and can't see your latest commits.
 
-## The Solution (3 Steps)
+## The Solution: Reconnect GitHub First
 
-### Step 1: Go to Railway
-1. Open https://railway.app
-2. Click on "guardian-connect" project
-3. Click on "backend" service
+### ⚠️ IMPORTANT: You Must Reconnect GitHub First
 
-### Step 2: Redeploy
-1. Click **"Deployments"** tab (at the top)
-2. Find the crashed deployment (red box)
-3. Click **"Redeploy"** button
-4. **Select the latest commit** when asked:
-   - Look for: `06ef766`
-   - Message: "Add detailed manual deployment guide for Railway"
-   - This is the most recent commit with all fixes
-5. Click deploy/confirm
+After renaming the service, Railway can't see your latest commits. You need to reconnect the GitHub repository.
 
-### Step 3: Watch It Build
-- You'll see build logs appear
-- Should see: "Building...", "Installing...", "Starting..."
-- Eventually: "Deployed" or "Build Successful"
-- Service should start without crashing!
+### Step 1: Reconnect GitHub Repository
+
+1. **Go to Railway Project Settings**
+   - Open https://railway.app
+   - Click on "guardian-connect" project
+   - Click **"Settings"** (project-level, at top or sidebar)
+
+2. **Find Source/Repository Section**
+   - Look for **"Source"** or **"Repository"** section
+   - If it says "Not connected" or shows wrong repo, continue
+
+3. **Reconnect**
+   - Click **"Connect Repository"** or **"Change Source"**
+   - Select: `Tredoux555/guardian-connect`
+   - Branch: `main`
+   - Click **"Connect"** or **"Save"**
+
+4. **Verify**
+   - Should now show: `Tredoux555/guardian-connect` (main)
+   - Status: "Connected"
+
+### Step 2: Now Deploy Latest Code
+
+1. **Go to Backend Service**
+   - Click on "backend" service
+   - Click **"Deployments"** tab
+
+2. **Deploy Latest**
+   - Click **"Deploy"** button (should now be available)
+   - Select **"Deploy Latest Commit"**
+   - Should show your latest commit with all fixes
+   - Click deploy/confirm
+
+3. **Watch It Build**
+   - You'll see build logs appear
+   - Should see: "Building...", "Installing...", "Starting..."
+   - Eventually: "Deployed" or "Build Successful"
+   - Service should start without crashing!
 
 ## That's It!
 
-Once redeployed, your service should work because:
+Once reconnected and redeployed, your service should work because:
+- ✅ Railway can now see your latest commits
 - ✅ All config files are fixed
 - ✅ Server path is correct (`dist/src/server.js`)
 - ✅ Build verification is in place
 
-## If It Still Crashes
+## If "Redeploy" Still Only Shows Old Commit
+
+This means GitHub isn't reconnected yet. Try:
+
+1. **Check Service Settings**
+   - Backend service → Settings tab
+   - Look for "Source" section
+   - If missing/disconnected, reconnect there
+
+2. **Check GitHub Webhooks**
+   - Go to: https://github.com/Tredoux555/guardian-connect/settings/hooks
+   - Should see Railway webhook
+   - If missing, reconnect in Railway (forces new webhook)
+
+3. **See Full Guide**
+   - Read: `FIX_DEPLOYMENT_AFTER_RENAME.md` for detailed steps
+
+## If It Still Crashes After Deploying Latest
 
 Check the logs:
 1. Click on the deployment
@@ -43,6 +83,5 @@ Check the logs:
 
 ---
 
-**Commit to deploy:** `06ef766`
-**This commit has:** All the crash prevention fixes
+**Important**: The issue is Railway can't see your latest commits. Reconnecting GitHub fixes this.
 
