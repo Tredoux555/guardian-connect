@@ -168,9 +168,19 @@ router.post(
           verified: user.verified,
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login error:', error);
-      res.status(500).json({ error: 'Login failed' });
+      console.error('Login error stack:', error?.stack);
+      console.error('Login error details:', {
+        message: error?.message,
+        code: error?.code,
+        name: error?.name,
+      });
+      // Return more detailed error in development, generic in production
+      const errorMessage = process.env.NODE_ENV === 'production' 
+        ? 'Login failed' 
+        : `Login failed: ${error?.message || 'Unknown error'}`;
+      res.status(500).json({ error: errorMessage });
     }
   }
 );
