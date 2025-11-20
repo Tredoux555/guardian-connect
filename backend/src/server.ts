@@ -39,7 +39,19 @@ const getNetworkIP = (): string => {
   return '192.168.1.3';
 };
 const networkIP = getNetworkIP(); // Your local network IP
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [
+// Parse ALLOWED_ORIGINS, filtering out empty strings
+const parseAllowedOrigins = (): string[] => {
+  if (!process.env.ALLOWED_ORIGINS) {
+    return [];
+  }
+  return process.env.ALLOWED_ORIGINS
+    .split(',')
+    .map(o => o.trim())
+    .filter(o => o.length > 0); // Remove empty strings
+};
+
+const envAllowedOrigins = parseAllowedOrigins();
+const allowedOrigins = envAllowedOrigins.length > 0 ? envAllowedOrigins : [
   'http://localhost:3002', // Admin panel (default)
   'http://localhost:3003', // Web user interface (default)
   'http://localhost:3004', // Admin panel (alternative port)
@@ -68,9 +80,10 @@ app.use(cors({
       }
       
       // In production, check allowed origins
-      // If ALLOWED_ORIGINS is not set, allow all (for initial setup)
-      if (!process.env.ALLOWED_ORIGINS || allowedOrigins.length === 0) {
-        console.warn('⚠️ CORS: ALLOWED_ORIGINS not set, allowing all origins (not recommended for production)');
+      // If ALLOWED_ORIGINS is not set or empty, allow all (for initial setup)
+      if (!process.env.ALLOWED_ORIGINS || envAllowedOrigins.length === 0) {
+        console.warn('⚠️ CORS: ALLOWED_ORIGINS not set or empty, allowing all origins (not recommended for production)');
+        console.warn('⚠️ CORS: Set ALLOWED_ORIGINS environment variable for production security');
         return callback(null, true);
       }
       
@@ -80,11 +93,13 @@ app.use(cors({
       } else {
         console.warn('❌ CORS: Blocked origin:', origin);
         console.warn('❌ CORS: Allowed origins:', allowedOrigins);
-        return callback(new Error('Not allowed by CORS'));
+        // Return false instead of error to properly reject CORS
+        return callback(null, false);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ CORS: Error in origin callback:', error);
-      // On error, allow the request to prevent complete failure
+      console.error('❌ CORS: Error stack:', error?.stack);
+      // On error, allow the request to prevent complete failure (but log it)
       return callback(null, true);
     }
   },
