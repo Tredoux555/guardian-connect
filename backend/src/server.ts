@@ -53,31 +53,46 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) {
-      console.log('✅ CORS: Allowing request with no origin');
+    try {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) {
+        console.log('✅ CORS: Allowing request with no origin');
+        return callback(null, true);
+      }
+      
+      // In development, allow ALL origins for easier testing
+      // This prevents CORS issues when frontend and backend are on different IPs/ports
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('✅ CORS: Allowing origin in development:', origin);
+        return callback(null, true);
+      }
+      
+      // In production, check allowed origins
+      // If ALLOWED_ORIGINS is not set, allow all (for initial setup)
+      if (!process.env.ALLOWED_ORIGINS || allowedOrigins.length === 0) {
+        console.warn('⚠️ CORS: ALLOWED_ORIGINS not set, allowing all origins (not recommended for production)');
+        return callback(null, true);
+      }
+      
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        console.log('✅ CORS: Allowing origin from allowed list:', origin);
+        return callback(null, true);
+      } else {
+        console.warn('❌ CORS: Blocked origin:', origin);
+        console.warn('❌ CORS: Allowed origins:', allowedOrigins);
+        return callback(new Error('Not allowed by CORS'));
+      }
+    } catch (error) {
+      console.error('❌ CORS: Error in origin callback:', error);
+      // On error, allow the request to prevent complete failure
       return callback(null, true);
-    }
-    
-    // In development, allow ALL origins for easier testing
-    // This prevents CORS issues when frontend and backend are on different IPs/ports
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('✅ CORS: Allowing origin in development:', origin);
-      return callback(null, true);
-    }
-    
-    // In production, check allowed origins
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      console.log('✅ CORS: Allowing origin from allowed list:', origin);
-      callback(null, true);
-    } else {
-      console.warn('❌ CORS: Blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
