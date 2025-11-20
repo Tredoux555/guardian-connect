@@ -20,6 +20,9 @@ const app: Express = express();
 const httpServer = createServer(app);
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
+// Trust proxy - required for Railway's reverse proxy and rate limiting
+app.set('trust proxy', true);
+
 // Initialize Socket.io
 initializeSocket(httpServer);
 
@@ -134,6 +137,69 @@ app.get('/', (req, res) => {
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Diagnostic endpoint to check backend configuration
+app.get('/api/diagnostic', async (req, res) => {
+  const diagnostics: any = {
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    checks: {},
+  };
+
+  // Check database connection
+  try {
+    const { query } = await import('./database/db');
+    const result = await query('SELECT NOW() as current_time');
+    diagnostics.checks.database = {
+      status: 'connected',
+      currentTime: result.rows[0]?.current_time,
+    };
+  } catch (error: any) {
+    diagnostics.checks.database = {
+      status: 'error',
+      error: error.message,
+      code: error.code,
+    };
+  }
+
+  // Check if users table exists
+  try {
+    const { query } = await import('./database/db');
+    const result = await query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'users'
+      );
+    `);
+    diagnostics.checks.usersTable = {
+      exists: result.rows[0]?.exists || false,
+    };
+  } catch (error: any) {
+    diagnostics.checks.usersTable = {
+      exists: false,
+      error: error.message,
+    };
+  }
+
+  // Check environment variables
+  diagnostics.checks.env = {
+    JWT_SECRET: process.env.JWT_SECRET ? 'set' : 'missing',
+    JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET ? 'set' : 'missing',
+    NODE_ENV: process.env.NODE_ENV || 'not set',
+    DB_HOST: process.env.PGHOST || process.env.DB_HOST || 'not set',
+    DB_NAME: process.env.PGDATABASE || process.env.DB_NAME || 'not set',
+    ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || 'not set',
+  };
+
+  // Determine overall status
+  const hasErrors = 
+    diagnostics.checks.database?.status === 'error' ||
+    !diagnostics.checks.usersTable?.exists ||
+    diagnostics.checks.env.JWT_SECRET === 'missing';
+
+  res.status(hasErrors ? 500 : 200).json(diagnostics);
 });
 
 // Routes
