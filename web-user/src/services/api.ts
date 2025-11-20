@@ -1,6 +1,7 @@
 import axios from 'axios'
 
 // Auto-detect API URL based on current hostname
+// Updated: Added Railway domain detection and improved console logging
 // If accessed from network IP (e.g., 192.168.1.3:3003), use same IP for API
 // If accessed from ngrok (HTTPS), use network IP for backend (HTTP)
 // If accessed from Railway (HTTPS), use VITE_API_URL or construct from hostname
