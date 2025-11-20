@@ -3,10 +3,12 @@ import axios from 'axios'
 // Auto-detect API URL based on current hostname
 // If accessed from network IP (e.g., 192.168.1.3:3003), use same IP for API
 // If accessed from ngrok (HTTPS), use network IP for backend (HTTP)
+// If accessed from Railway (HTTPS), use VITE_API_URL or construct from hostname
 // If accessed from localhost, use localhost for API
 const getApiBaseUrl = (): string => {
   // Use explicit VITE_API_URL if set (and not localhost)
   if (import.meta.env.VITE_API_URL && !import.meta.env.VITE_API_URL.includes('localhost')) {
+    console.log('✅ Using VITE_API_URL:', import.meta.env.VITE_API_URL);
     return import.meta.env.VITE_API_URL;
   }
   
@@ -15,6 +17,19 @@ const getApiBaseUrl = (): string => {
   const protocol = window.location.protocol;
   const port = '3001'; // Backend port
   const networkIP = '192.168.1.3'; // Server's network IP
+  
+  // If accessed via Railway (production)
+  if (hostname.includes('.railway.app') || hostname.includes('.up.railway.app')) {
+    // On Railway, we MUST use VITE_API_URL - can't auto-detect backend URL
+    // If VITE_API_URL is not set, show clear error
+    if (!import.meta.env.VITE_API_URL || import.meta.env.VITE_API_URL.includes('localhost')) {
+      console.error('❌ ERROR: On Railway but VITE_API_URL is not set or points to localhost!');
+      console.error('❌ Please set VITE_API_URL in Railway → Frontend Service → Variables');
+      console.error('❌ Value should be: https://your-backend-url.railway.app/api');
+      // Still return something to prevent complete failure, but it won't work
+      return 'http://localhost:3001/api'; // This will fail, but at least shows the error
+    }
+  }
   
   // If accessed via ngrok (HTTPS), backend is still on network IP (HTTP)
   if (hostname.includes('.ngrok.io') || hostname.includes('.ngrok-free.app') || hostname.includes('.ngrok.app')) {
@@ -32,17 +47,23 @@ const getApiBaseUrl = (): string => {
     return `${protocol}//${hostname}:${port}/api`;
   }
   
-  // Otherwise use localhost (development)
+  // If on localhost (development)
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    console.log('🔧 Development mode: Using localhost API');
+    return 'http://localhost:3001/api';
+  }
+  
+  // Fallback: if we don't recognize the hostname, warn and use localhost
+  console.warn('⚠️ Unknown hostname:', hostname, '- falling back to localhost. Set VITE_API_URL if this is production.');
   return 'http://localhost:3001/api';
 };
 
 const API_BASE_URL = getApiBaseUrl();
 
-// Only log API URL in development
-if (import.meta.env.DEV) {
-  console.log('API Base URL:', API_BASE_URL)
-  console.log('Environment VITE_API_URL:', import.meta.env.VITE_API_URL)
-}
+// Always log API URL for debugging (helps identify issues in production)
+console.log('🌐 API Base URL:', API_BASE_URL);
+console.log('🔧 Environment VITE_API_URL:', import.meta.env.VITE_API_URL || 'NOT SET');
+console.log('📍 Current hostname:', window.location.hostname);
 
 const api = axios.create({
   baseURL: API_BASE_URL,
