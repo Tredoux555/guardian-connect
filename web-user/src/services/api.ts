@@ -9,8 +9,16 @@ import axios from 'axios'
 const getApiBaseUrl = (): string => {
   // Use explicit VITE_API_URL if set (and not localhost)
   if (import.meta.env.VITE_API_URL && !import.meta.env.VITE_API_URL.includes('localhost')) {
-    console.log('✅ Using VITE_API_URL:', import.meta.env.VITE_API_URL);
-    return import.meta.env.VITE_API_URL;
+    let apiUrl = import.meta.env.VITE_API_URL;
+    // Ensure URL has protocol (https:// or http://)
+    if (!apiUrl.startsWith('http://') && !apiUrl.startsWith('https://')) {
+      // If on Railway or HTTPS context, use https, otherwise http
+      const protocol = window.location.protocol === 'https:' ? 'https://' : 'http://';
+      apiUrl = protocol + apiUrl;
+      console.warn('⚠️ VITE_API_URL missing protocol, added:', protocol);
+    }
+    console.log('✅ Using VITE_API_URL:', apiUrl);
+    return apiUrl;
   }
   
   // Auto-detect: if we're on a network IP, use that IP for API
