@@ -9,5 +9,5 @@ cmds = ["npm install"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "npx http-server dist -a 0.0.0.0 -p $PORT -S"
+cmd = "node server.js"
 
