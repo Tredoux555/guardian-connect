@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "npx serve -s dist --listen 0.0.0.0:$PORT",
+    "startCommand": "HOST=0.0.0.0 npx serve -s dist -l $PORT",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
