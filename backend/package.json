@@ -8,7 +8,9 @@
     "build": "tsc",
     "postbuild": "node -e \"try { require('fs').accessSync('dist/src/server.js'); console.log('✓ Build verification passed'); } catch(e) { console.error('ERROR: dist/src/server.js not found after build!'); process.exit(1); }\"",
     "start": "node dist/src/server.js",
-    "migrate": "node dist/src/database/migrations/run.js"
+    "migrate": "node dist/src/database/migrations/run.js",
+    "setup-db": "tsc && node dist/src/database/setup-database.js",
+    "create-admin": "tsc && node dist/src/database/create-admin.js"
   },
   "keywords": [],
   "author": "",
