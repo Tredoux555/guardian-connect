@@ -9,5 +9,5 @@ cmds = ["npm install"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "npx serve -s dist --host 0.0.0.0 --port $PORT"
+cmd = "npx http-server dist -p $PORT -a 0.0.0.0 --cors"
 
