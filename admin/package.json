@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "postbuild": "node -e \"const fs = require('fs'); const dist = './dist'; if (!fs.existsSync(dist)) { console.error('❌ ERROR: dist folder not created!'); process.exit(1); } if (!fs.existsSync(dist + '/index.html')) { console.error('❌ ERROR: index.html not found in dist!'); process.exit(1); } console.log('✅ Build verification passed');\"",
     "preview": "vite preview",
     "start": "node server.js",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
