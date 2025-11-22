@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { GoogleMap, Marker, InfoWindow } from '@react-google-maps/api'
 import api from '../services/api'
 import { getCurrentUserId } from '../utils/jwt'
-import { GoogleMapsLoader } from '../components/GoogleMapsLoader'
 import { 
   connectSocket, 
   joinEmergency, 
@@ -465,7 +464,7 @@ function EmergencyActive() {
       }
       
       // Simple check - if map is provided, it's ready
-      // GoogleMapsLoader already ensures google.maps is available before rendering
+      // Google Maps API is preloaded in App.tsx, so it should be available
       mapRef.current = map
       
       // Mark as loaded immediately - no need for complex delays
@@ -1333,19 +1332,18 @@ function EmergencyActive() {
       {/* Google Maps */}
       {GOOGLE_MAPS_API_KEY && (
         <div className="map-container">
-          <GoogleMapsLoader>
-            {typeof window !== 'undefined' && (window as any).google?.maps ? (
-              <GoogleMap
-                mapContainerStyle={mapContainerStyle}
-                center={mapCenter}
-                zoom={locations.length > 0 ? 15 : 2}
-                onLoad={onMapLoad}
-                options={{
-                  streetViewControl: false,
-                  mapTypeControl: true,
-                  fullscreenControl: true,
-                }}
-              >
+          {typeof window !== 'undefined' && (window as any).google?.maps ? (
+            <GoogleMap
+              mapContainerStyle={mapContainerStyle}
+              center={mapCenter}
+              zoom={locations.length > 0 ? 15 : 2}
+              onLoad={onMapLoad}
+              options={{
+                streetViewControl: false,
+                mapTypeControl: true,
+                fullscreenControl: true,
+              }}
+            >
               {/* Render markers for all locations - both sender and receiver */}
               {/* Only render markers when Google Maps API is fully available and map is ready */}
               {locations.length > 0 && emergency && emergency.user_id && 
@@ -1509,7 +1507,6 @@ function EmergencyActive() {
                 </p>
               </div>
             )}
-          </GoogleMapsLoader>
           {locations.length === 0 && (
             <div className="map-placeholder" style={{
               padding: '2rem',

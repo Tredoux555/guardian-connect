@@ -5,11 +5,13 @@ import Home from './pages/Home'
 import EmergencyActive from './pages/EmergencyActive'
 import EmergencyResponse from './pages/EmergencyResponse'
 import Contacts from './pages/Contacts'
+import Profile from './pages/Profile'
 // Lazy load Stripe pages - only loads when route is accessed (prevents Stripe initialization errors)
 const Donations = lazy(() => import('./pages/Donations'))
 const Subscriptions = lazy(() => import('./pages/Subscriptions'))
 import { FEATURES } from './utils/featureFlags'
 import { registerServiceWorker, requestNotificationPermission, subscribeToPushNotifications } from './services/notifications'
+import { GoogleMapsLoader } from './components/GoogleMapsLoader'
 import './App.css'
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -39,44 +41,47 @@ function App() {
   }, [])
 
   return (
-    <Router
-      future={{
-        v7_startTransition: true,
-        v7_relativeSplatPath: true
-      }}
-    >
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-        <Route path="/emergency/:id" element={<ProtectedRoute><EmergencyActive /></ProtectedRoute>} />
-        <Route path="/respond/:id" element={<ProtectedRoute><EmergencyResponse /></ProtectedRoute>} />
-        <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
-        {FEATURES.donations && (
-          <Route 
-            path="/donations" 
-            element={
-              <ProtectedRoute>
-                <Suspense fallback={<div className="loading" style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}>
-                  <Donations />
-                </Suspense>
-              </ProtectedRoute>
-            } 
-          />
-        )}
-        {FEATURES.subscriptions && (
-          <Route 
-            path="/subscriptions" 
-            element={
-              <ProtectedRoute>
-                <Suspense fallback={<div className="loading" style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}>
-                  <Subscriptions />
-                </Suspense>
-              </ProtectedRoute>
-            } 
-          />
-        )}
-      </Routes>
-    </Router>
+    <GoogleMapsLoader>
+      <Router
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true
+        }}
+      >
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+          <Route path="/emergency/:id" element={<ProtectedRoute><EmergencyActive /></ProtectedRoute>} />
+          <Route path="/respond/:id" element={<ProtectedRoute><EmergencyResponse /></ProtectedRoute>} />
+          <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+          {FEATURES.donations && (
+            <Route 
+              path="/donations" 
+              element={
+                <ProtectedRoute>
+                  <Suspense fallback={<div className="loading" style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}>
+                    <Donations />
+                  </Suspense>
+                </ProtectedRoute>
+              } 
+            />
+          )}
+          {FEATURES.subscriptions && (
+            <Route 
+              path="/subscriptions" 
+              element={
+                <ProtectedRoute>
+                  <Suspense fallback={<div className="loading" style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}>
+                    <Subscriptions />
+                  </Suspense>
+                </ProtectedRoute>
+              } 
+            />
+          )}
+        </Routes>
+      </Router>
+    </GoogleMapsLoader>
   )
 }
 
