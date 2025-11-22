@@ -232,15 +232,52 @@ function Home() {
           navigator.geolocation.getCurrentPosition(
             async (position) => {
               clearTimeout(timeout)
+              
+              // STEP 1: Log exact GPS coordinates from device (BEFORE any processing)
+              const deviceLat = position.coords.latitude
+              const deviceLng = position.coords.longitude
+              console.log('🔍 [COORDINATE TRACE] Step 1 - Device GPS:', {
+                latitude: deviceLat,
+                longitude: deviceLng,
+                latitudeType: typeof deviceLat,
+                longitudeType: typeof deviceLng,
+                latitudeString: String(deviceLat),
+                longitudeString: String(deviceLng),
+                accuracy: position.coords.accuracy,
+                altitude: position.coords.altitude,
+                heading: position.coords.heading,
+                speed: position.coords.speed,
+                timestamp: new Date(position.timestamp).toISOString()
+              })
+              
               try {
-                const locationResponse = await api.post(`/emergencies/${emergencyId}/location`, {
-                  latitude: position.coords.latitude,
-                  longitude: position.coords.longitude,
+                // STEP 2: Log what we're sending to backend
+                console.log('🔍 [COORDINATE TRACE] Step 2 - Sending to backend:', {
+                  latitude: deviceLat,
+                  longitude: deviceLng,
+                  latitudeType: typeof deviceLat,
+                  longitudeType: typeof deviceLng,
+                  emergencyId: emergencyId
                 })
+                
+                const locationResponse = await api.post(`/emergencies/${emergencyId}/location`, {
+                  latitude: deviceLat,
+                  longitude: deviceLng,
+                })
+                
+                // STEP 3: Log backend response
+                console.log('🔍 [COORDINATE TRACE] Step 3 - Backend response:', {
+                  status: locationResponse.status,
+                  data: locationResponse.data,
+                  sentLat: deviceLat,
+                  sentLng: deviceLng,
+                  emergencyId: emergencyId
+                })
+                
                 // Always log location sharing success (critical for debugging)
                 console.log('✅ Sender location shared successfully:', {
-                  lat: position.coords.latitude,
-                  lng: position.coords.longitude,
+                  lat: deviceLat,
+                  lng: deviceLng,
                   response: locationResponse.status,
                   emergencyId: emergencyId
                 })
