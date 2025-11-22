@@ -188,16 +188,21 @@ function EmergencyActive() {
     }
   }, [id])
 
-  // Monitor map loading timeout
+  // Monitor map loading timeout - longer for Safari
   useEffect(() => {
     if (!mapLoaded && id) {
+      // Detect Safari for longer timeout
+      const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || /iphone|ipad|ipod/i.test(navigator.userAgent)
+      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
+      const timeoutDuration = isIOS ? 20000 : isSafariBrowser ? 15000 : 10000 // 20s for iOS, 15s for Safari, 10s for others
+      
       const timeout = setTimeout(() => {
         if (!mapLoaded && mapRef.current) {
-          console.warn('⚠️ Map did not load within expected time. Map ref exists but mapLoaded is still false.')
+          console.warn('⚠️ Map did not load within expected time. Map ref exists but mapLoaded is still false.' + (isSafariBrowser ? ' (Safari)' : ''))
         } else if (!mapLoaded && !mapRef.current) {
-          console.warn('⚠️ Map did not load within expected time. Map ref is null.')
+          console.warn('⚠️ Map did not load within expected time. Map ref is null.' + (isSafariBrowser ? ' (Safari)' : ''))
         }
-      }, 3000) // Warn after 3 seconds
+      }, timeoutDuration)
       
       return () => clearTimeout(timeout)
     }
@@ -619,13 +624,37 @@ function EmergencyActive() {
    * Using 8 decimal places ensures exact match between database, map markers, and Google Maps URLs
    * According to Google Maps documentation, coordinates should be URL-encoded with comma as %2C
    */
-  const formatCoordinate = (coord: number): string => {
-    if (isNaN(coord)) {
+  const formatCoordinate = (coord: string | number | null | undefined): string => {
+    if (coord === null || coord === undefined) {
       return '0'
     }
-    // Use 8 decimal places to match database precision exactly
-    // This ensures map markers and Google Maps URLs use identical coordinates
-    return coord.toFixed(8)
+    
+    let coordStr = typeof coord === 'number' ? coord.toString() : coord
+    
+    // Split into integer and decimal parts
+    const parts = coordStr.split('.')
+    let integer = parts[0] || '0'
+    let decimal = parts[1] || ''
+    
+    // Handle negative numbers
+    const isNegative = integer.startsWith('-')
+    if (isNegative) {
+      integer = integer.slice(1)
+    }
+    
+    // Pad decimal to exactly 8 places
+    while (decimal.length < 8) {
+      decimal += '0'
+    }
+    // Truncate if longer
+    decimal = decimal.slice(0, 8)
+    
+    let formatted = `${integer}.${decimal}`
+    if (isNegative) {
+      formatted = `-${formatted}`
+    }
+    
+    return formatted
   }
 
   /**
@@ -637,71 +666,62 @@ function EmergencyActive() {
    * geocode to the same district (e.g., "Haidian District, Beijing, China")
    */
   const getGoogleMapsUrl = (
-    originLat: number, 
-    originLng: number, 
-    destLat: number, 
-    destLng: number
+    originLat: string | number, 
+    originLng: string | number, 
+    destLat: string | number, 
+    destLng: string | number
   ): string => {
     try {
-      // Validate destination coordinates before building URL
-      if (isNaN(destLat) || isNaN(destLng)) {
-        throw new Error('Invalid destination coordinates provided to getGoogleMapsUrl')
-      }
+      // Format all coordinates as strings with exact precision
+      const formattedDestLat = formatCoordinate(destLat)
+      const formattedDestLng = formatCoordinate(destLng)
       
-      // Format destination coordinates with 8 decimal places (matching database precision)
-      // According to Google Maps documentation, coordinates should be comma-separated and URL-encoded
-      // encodeURIComponent() will encode the comma as %2C, which is correct per documentation
-      const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
-      const encodedDest = encodeURIComponent(destCoords)
+      // Validate destination coordinates
+      if (formattedDestLat === '0' || formattedDestLng === '0') {
+        throw new Error('Invalid destination coordinates')
+      }
       
       // Detect mobile device
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
       
       if (isMobile) {
-        // On mobile: Send only destination - Google Maps automatically uses device GPS for origin
-        // This ensures accurate directions from user's actual current location
-        // Google Maps will automatically detect device GPS and use it as origin
-        // CRITICAL: URL-encode destination coordinates per Google Maps Platform requirements
-        // encodeURIComponent() encodes comma (,) as %2C, which matches Google Maps documentation
-        // Using 8 decimal places ensures exact match with database and map markers
+        // On mobile: Use destination only - Google Maps uses device GPS
+        // URL-encode the exact coordinate string
+        const destCoords = `${formattedDestLat},${formattedDestLng}`
+        const encodedDest = encodeURIComponent(destCoords)
         return `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
       } else {
-        // On desktop: Use exact coordinates from locations array
-        // Validate origin coordinates
-        if (isNaN(originLat) || isNaN(originLng)) {
-          // Fallback to destination only if origin invalid
+        // On desktop: Use exact origin and destination
+        const formattedOriginLat = formatCoordinate(originLat)
+        const formattedOriginLng = formatCoordinate(originLng)
+        
+        // Validate origin
+        if (formattedOriginLat === '0' || formattedOriginLng === '0') {
+          const destCoords = `${formattedDestLat},${formattedDestLng}`
+          const encodedDest = encodeURIComponent(destCoords)
           return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
         }
         
-        // Format coordinates with 8 decimal places (matching database precision)
-        const originCoords = `${formatCoordinate(originLat)},${formatCoordinate(originLng)}`
-        
-        // Check if origin and destination are the same (or very close)
-        // Calculate distance in degrees (rough approximation)
-        const latDiff = Math.abs(originLat - destLat)
-        const lngDiff = Math.abs(originLng - destLng)
-        const distance = Math.sqrt(latDiff * latDiff + lngDiff * lngDiff)
-        
-        // If locations are identical or extremely close (< 0.0001 degrees ≈ 11 meters), just show destination
-        if (distance < 0.0001) {
+        // Check if origin and destination are identical
+        if (formattedOriginLat === formattedDestLat && formattedOriginLng === formattedDestLng) {
+          const destCoords = `${formattedDestLat},${formattedDestLng}`
+          const encodedDest = encodeURIComponent(destCoords)
           return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
         }
         
-        // Use the most reliable format for directions with exact coordinates
-        // Key elements:
-        // 1. Use coordinates directly (not place_id) to avoid geocoding to districts
-        // 2. Use 'dir_action=navigate' to force navigation mode
-        // 3. URL-encode coordinates - encodeURIComponent() encodes comma as %2C per documentation
-        // 4. Using 8 decimal places ensures exact match with database and map markers
-        // This format forces Google Maps to treat them as GPS coordinates, not addresses
+        const originCoords = `${formattedOriginLat},${formattedOriginLng}`
+        const destCoords = `${formattedDestLat},${formattedDestLng}`
         const encodedOrigin = encodeURIComponent(originCoords)
+        const encodedDest = encodeURIComponent(destCoords)
         return `https://www.google.com/maps/dir/?api=1&origin=${encodedOrigin}&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
       }
       
     } catch (error) {
       console.error('Error generating Google Maps URL:', error)
-      // Fallback to destination only (with URL encoding)
-      const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+      // Fallback to destination only using string values
+      const formattedDestLat = formatCoordinate(destLat)
+      const formattedDestLng = formatCoordinate(destLng)
+      const destCoords = `${formattedDestLat},${formattedDestLng}`
       const encodedDest = encodeURIComponent(destCoords)
       return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
     }
@@ -919,16 +939,28 @@ function EmergencyActive() {
           return
         }
 
-        // Parse coordinates using unified function - MUST match map markers exactly
-        // This ensures Google Maps URL uses identical coordinates as map markers
+        // Use formatCoordinate directly on raw database values to preserve precision
+        // This avoids floating-point conversion that can cause precision loss
+        const formattedDestLat = formatCoordinate(senderLoc.latitude)
+        const formattedDestLng = formatCoordinate(senderLoc.longitude)
+        
+        // Validate formatted coordinates (check they're not '0')
+        if (formattedDestLat === '0' || formattedDestLng === '0') {
+          console.error('Invalid destination coordinates:', { rawLat: senderLoc.latitude, rawLng: senderLoc.longitude, senderLoc })
+          setGoogleMapsUrl(null)
+          setGoogleMapsUrlLoading(false)
+          return
+        }
+        
+        // Parse for validation only (not used in URL)
         const destLat = parseCoordinate(senderLoc.latitude)
         const destLng = parseCoordinate(senderLoc.longitude)
         
-        // Validate destination coordinates
+        // Validate parsed coordinates for range checking
         if (isNaN(destLat) || isNaN(destLng) || 
             destLat < -90 || destLat > 90 || 
             destLng < -180 || destLng > 180) {
-          console.error('Invalid destination coordinates:', { destLat, destLng, rawLat: senderLoc.latitude, rawLng: senderLoc.longitude, senderLoc })
+          console.error('Invalid destination coordinates (range check):', { destLat, destLng, rawLat: senderLoc.latitude, rawLng: senderLoc.longitude, senderLoc })
           setGoogleMapsUrl(null)
           setGoogleMapsUrlLoading(false)
           return
@@ -936,8 +968,6 @@ function EmergencyActive() {
         
         // Debug: Log coordinates to verify they match map markers
         // Always log for debugging location issues
-        const formattedDestLat = formatCoordinate(destLat)
-        const formattedDestLng = formatCoordinate(destLng)
         console.log('🔗 Google Maps URL Coordinates (Destination):', {
           raw: { lat: senderLoc.latitude, lng: senderLoc.longitude },
           parsed: { lat: destLat, lng: destLng },
@@ -980,17 +1010,22 @@ function EmergencyActive() {
         let url: string
         
         if (responderLoc) {
-          // Parse origin coordinates using unified function - matches destination parsing
+          // Format origin coordinates directly from database values (preserve precision)
+          const formattedOriginLat = formatCoordinate(responderLoc.latitude)
+          const formattedOriginLng = formatCoordinate(responderLoc.longitude)
+          
+          // Parse for validation only
           const originLat = parseCoordinate(responderLoc.latitude)
           const originLng = parseCoordinate(responderLoc.longitude)
           
           // Validate origin coordinates
-          if (!isNaN(originLat) && !isNaN(originLng) &&
+          if (formattedOriginLat !== '0' && formattedOriginLng !== '0' &&
+              !isNaN(originLat) && !isNaN(originLng) &&
               originLat >= -90 && originLat <= 90 &&
               originLng >= -180 && originLng <= 180) {
-            // Always use getGoogleMapsUrl - it will handle mobile vs desktop automatically
+            // Always use getGoogleMapsUrl with formatted strings - preserves exact precision
             // On mobile, it uses "My Location", on desktop it uses exact coordinates
-            url = getGoogleMapsUrl(originLat, originLng, destLat, destLng)
+            url = getGoogleMapsUrl(formattedOriginLat, formattedOriginLng, formattedDestLat, formattedDestLng)
             
             // Debug: Log full URL generation details
             if (import.meta.env.DEV) {
@@ -1001,31 +1036,31 @@ function EmergencyActive() {
               })
             }
           } else {
-            // Invalid origin coordinates
+            // Invalid origin coordinates - use formatted destination strings
             if (isMobile) {
               // On mobile: Send only destination - Google Maps automatically uses device GPS
-              // CRITICAL: URL-encode destination coordinates per Google Maps Platform requirements
-              const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+              // CRITICAL: Use already-formatted strings to preserve precision
+              const destCoords = `${formattedDestLat},${formattedDestLng}`
               const encodedDest = encodeURIComponent(destCoords)
               url = `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
             } else {
               // On desktop: Fallback to destination only
-              const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+              const destCoords = `${formattedDestLat},${formattedDestLng}`
               const encodedDest = encodeURIComponent(destCoords)
               url = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
             }
           }
         } else {
-          // Responder location not available yet
+          // Responder location not available yet - use formatted destination strings
           if (isMobile) {
             // On mobile: Send only destination - Google Maps automatically uses device GPS for origin
-            // CRITICAL: URL-encode destination coordinates per Google Maps Platform requirements
-            const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+            // CRITICAL: Use already-formatted strings to preserve precision
+            const destCoords = `${formattedDestLat},${formattedDestLng}`
             const encodedDest = encodeURIComponent(destCoords)
             url = `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
           } else {
             // On desktop: Use destination only
-            const destCoords = `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
+            const destCoords = `${formattedDestLat},${formattedDestLng}`
             const encodedDest = encodeURIComponent(destCoords)
             url = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
           }

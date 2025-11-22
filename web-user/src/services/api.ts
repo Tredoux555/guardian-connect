@@ -30,13 +30,19 @@ const getApiBaseUrl = (): string => {
   // If accessed via Railway (production)
   if (hostname.includes('.railway.app') || hostname.includes('.up.railway.app')) {
     // On Railway, we MUST use VITE_API_URL - can't auto-detect backend URL
-    // If VITE_API_URL is not set, show clear error
+    // If VITE_API_URL is not set, show clear error and try to construct from common pattern
     if (!import.meta.env.VITE_API_URL || import.meta.env.VITE_API_URL.includes('localhost')) {
       console.error('❌ ERROR: On Railway but VITE_API_URL is not set or points to localhost!');
       console.error('❌ Please set VITE_API_URL in Railway → Frontend Service → Variables');
       console.error('❌ Value should be: https://your-backend-url.railway.app/api');
-      // Still return something to prevent complete failure, but it won't work
-      return 'http://localhost:3001/api'; // This will fail, but at least shows the error
+      
+      // Try to construct backend URL from frontend URL pattern (common Railway pattern)
+      // If frontend is: dynamic-hope-production-2e52.up.railway.app
+      // Backend might be: overflowing-reprieve-production-4619.up.railway.app
+      // But we can't reliably guess, so show error and fail gracefully
+      console.error('❌ Cannot auto-detect backend URL on Railway. Login will fail until VITE_API_URL is set.');
+      // Return a placeholder that will fail but show clear error
+      return 'https://MISSING_VITE_API_URL.railway.app/api';
     }
   }
   
