@@ -39,6 +39,13 @@ const isScriptLoaded = (): boolean => {
 const isGoogleMapsReady = (): boolean => {
   if (typeof window === 'undefined') return false
   const win = window as Record<string, any>
+  
+  // First check if google object exists
+  if (!win['google'] || typeof win['google'] === 'undefined') {
+    return false
+  }
+  
+  // Then check for maps API
   return !!(
     win['google']?.maps && 
     win['google']?.maps?.Map &&
@@ -202,19 +209,32 @@ export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
       googleMapsApiKey={GOOGLE_MAPS_API_KEY}
       loadingElement={<div style={{ padding: '20px', textAlign: 'center' }}>Loading Google Maps...</div>}
       onLoad={() => {
-        const checkReady = (attempt = 0, maxAttempts = 40) => {
-          if (isGoogleMapsReady()) {
-            scriptLoadingRef.current = false
-            setIsReady(true)
-            setIsLoading(false)
-            console.log('✅ Google Maps API loaded successfully')
-            return
+        const checkReady = (attempt = 0, maxAttempts = 50) => {
+          const win = window as Record<string, any>
+          
+          // Check if google object exists first
+          if (win['google'] && typeof win['google'] !== 'undefined') {
+            // Then check if maps API is ready
+            if (isGoogleMapsReady()) {
+              scriptLoadingRef.current = false
+              setIsReady(true)
+              setIsLoading(false)
+              console.log('✅ Google Maps API loaded successfully')
+              return
+            }
           }
           
           if (attempt < maxAttempts) {
             retryTimeoutRef.current = setTimeout(() => checkReady(attempt + 1, maxAttempts), 300)
           } else {
             console.warn('⚠️ LoadScript onLoad fired but window.google.maps not available after multiple attempts')
+            console.warn('Debug info:', {
+              hasGoogle: !!win['google'],
+              googleType: typeof win['google'],
+              hasMaps: !!win['google']?.maps,
+              hasMapClass: !!win['google']?.maps?.Map,
+              hasMarkerClass: !!win['google']?.maps?.Marker
+            })
             scriptLoadingRef.current = false
             setIsLoading(false)
             setError('Google Maps API failed to initialize. Please check your API key and network connection.')
@@ -230,7 +250,8 @@ export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
           }
         }
         
-        setTimeout(() => checkReady(), 1000)
+        // Start checking after short delay to allow script to initialize
+        setTimeout(() => checkReady(), 500)
       }}
       onError={(error) => {
         scriptLoadingRef.current = false

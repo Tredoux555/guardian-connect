@@ -188,21 +188,17 @@ function EmergencyActive() {
     }
   }, [id])
 
-  // Monitor map loading timeout - longer for Safari
+  // Monitor map loading timeout
   useEffect(() => {
     if (!mapLoaded && id) {
-      // Detect Safari for longer timeout
-      const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || /iphone|ipad|ipod/i.test(navigator.userAgent)
-      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
-      const timeoutDuration = isIOS ? 20000 : isSafariBrowser ? 15000 : 10000 // 20s for iOS, 15s for Safari, 10s for others
-      
+      // Simple timeout - no Safari-specific logic needed
       const timeout = setTimeout(() => {
         if (!mapLoaded && mapRef.current) {
-          console.warn('⚠️ Map did not load within expected time. Map ref exists but mapLoaded is still false.' + (isSafariBrowser ? ' (Safari)' : ''))
+          console.warn('⚠️ Map did not load within expected time. Map ref exists but mapLoaded is still false.')
         } else if (!mapLoaded && !mapRef.current) {
-          console.warn('⚠️ Map did not load within expected time. Map ref is null.' + (isSafariBrowser ? ' (Safari)' : ''))
+          console.warn('⚠️ Map did not load within expected time. Map ref is null.')
         }
-      }, timeoutDuration)
+      }, 10000) // 10 seconds timeout
       
       return () => clearTimeout(timeout)
     }
@@ -464,67 +460,17 @@ function EmergencyActive() {
   const onMapLoad = useCallback((map: google.maps.Map) => {
     try {
       if (!map) {
+        console.warn('⚠️ onMapLoad called with null/undefined map')
         return
       }
       
-      // Ensure Google Maps API is available
-      if (typeof window === 'undefined' || !(window as any).google?.maps) {
-        // Retry after a short delay
-        setTimeout(() => {
-          try {
-            if ((window as any).google?.maps && map && map.getDiv && map.getDiv()) {
-              mapRef.current = map
-              setTimeout(() => {
-                try {
-                  if (mapRef.current === map && mapRef.current && mapRef.current.getDiv && mapRef.current.getDiv()) {
-                    setMapLoaded(true)
-                  } else {
-                    console.warn('⚠️ Map instance changed or invalid during retry initialization')
-                  }
-                } catch (err) {
-                  console.error('❌ Error checking map during retry:', err)
-                }
-              }, 500)
-            }
-          } catch (err) {
-            console.error('❌ Error in map retry initialization:', err)
-          }
-        }, 200)
-        return
-      }
-      
-      // Verify map has required methods before using it
-      if (!map.getDiv || typeof map.getDiv !== 'function') {
-        console.warn('⚠️ Map instance does not have getDiv method')
-        return
-      }
-      
-      // Set map reference and mark as loaded after a delay to ensure initialization
+      // Simple check - if map is provided, it's ready
+      // GoogleMapsLoader already ensures google.maps is available before rendering
       mapRef.current = map
       
-      // Verify map instance is valid
-      try {
-        const div = map.getDiv()
-        if (!div) {
-          console.warn('⚠️ Map instance does not have a valid div element')
-          return
-        }
-      } catch (err) {
-        console.error('❌ Error checking map div:', err)
-        return
-      }
-      
-      setTimeout(() => {
-        try {
-          if (mapRef.current === map && mapRef.current && mapRef.current.getDiv && mapRef.current.getDiv()) {
-            setMapLoaded(true)
-          } else {
-            console.warn('⚠️ Map instance changed or invalid during initialization')
-          }
-        } catch (err) {
-          console.error('❌ Error in map initialization timeout:', err)
-        }
-      }, 500)
+      // Mark as loaded immediately - no need for complex delays
+      setMapLoaded(true)
+      console.log('✅ Map loaded successfully')
     } catch (err) {
       console.error('❌ Error in onMapLoad:', err)
     }
