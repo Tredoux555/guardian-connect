@@ -62,24 +62,38 @@ export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
         </div>
       }
       onLoad={() => {
-        // Simple check - if LoadScript says it loaded, verify and set ready
-        const checkReady = () => {
-          if (isGoogleMapsReady()) {
-            setIsReady(true)
-            console.log('✅ Google Maps API loaded successfully')
+        // Wait longer on mobile Safari - the global might not be ready immediately
+        // Check multiple times to ensure google object is fully initialized
+        const checkReady = (attempt = 0, maxAttempts = 20) => {
+          const win = window as any
+          
+          // Check if google object exists AND has maps
+          if (win.google && typeof win.google !== 'undefined' && win.google.maps) {
+            // Double-check Map and Marker classes exist
+            if (win.google.maps.Map && win.google.maps.Marker) {
+              setIsReady(true)
+              console.log('✅ Google Maps API loaded successfully')
+              return
+            }
+          }
+          
+          if (attempt < maxAttempts) {
+            setTimeout(() => checkReady(attempt + 1, maxAttempts), 300)
           } else {
-            // Retry once after a short delay
-            setTimeout(() => {
-              if (isGoogleMapsReady()) {
-                setIsReady(true)
-                console.log('✅ Google Maps API loaded (delayed)')
-              } else {
-                console.warn('⚠️ Google Maps API not ready after onLoad')
-              }
-            }, 1000)
+            console.warn('⚠️ Google Maps API not ready after onLoad - max attempts reached')
+            console.warn('Debug info:', {
+              hasGoogle: !!win.google,
+              googleType: typeof win.google,
+              hasMaps: !!win.google?.maps,
+              hasMapClass: !!win.google?.maps?.Map,
+              hasMarkerClass: !!win.google?.maps?.Marker
+            })
           }
         }
-        checkReady()
+        
+        // Start checking after a delay (longer on mobile for Safari)
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+        setTimeout(() => checkReady(), isMobile ? 1000 : 500)
       }}
       onError={(error) => {
         console.error('❌ Google Maps load error:', error)

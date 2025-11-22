@@ -204,19 +204,31 @@ function Home() {
       setActiveEmergency(response.data.emergency)
       
       // Share location when emergency is created, then navigate
-      // Skip automatic location sharing on HTTP - browsers block it
+      // Skip automatic location sharing on HTTP (non-localhost) - browsers block it
       // Users can share location manually on EmergencyActive page
       const isHttp = window.location.protocol === 'http:' && window.location.hostname !== 'localhost'
       
       if (navigator.geolocation && !isHttp) {
+        // Check permission state first (if available)
+        let permissionState = 'prompt' // default
+        if (navigator.permissions && navigator.permissions.query) {
+          try {
+            const permission = await navigator.permissions.query({ name: 'geolocation' })
+            permissionState = permission.state
+            console.log('📍 Location permission state:', permissionState)
+          } catch (err) {
+            // Permissions API not supported or failed, continue anyway
+            console.log('📍 Permissions API not available, proceeding with location request')
+          }
+        }
+        
         await new Promise<void>((resolve) => {
           const timeout = setTimeout(() => {
-            if (import.meta.env.DEV) {
-              console.warn('⚠️ Location request timed out, navigating anyway')
-            }
+            console.warn('⚠️ Location request timed out, navigating anyway')
             resolve()
-          }, 8000) // 8 second timeout for mobile
+          }, 10000) // 10 second timeout for mobile (increased from 8)
           
+          console.log('📍 Requesting location permission...')
           navigator.geolocation.getCurrentPosition(
             async (position) => {
               clearTimeout(timeout)
@@ -248,16 +260,20 @@ function Home() {
             },
             (err) => {
               clearTimeout(timeout)
-              // Only log in development
-              if (import.meta.env.DEV) {
-                console.error('❌ Location error:', err)
-              }
+              console.error('❌ Location error:', {
+                code: err.code,
+                message: err.message,
+                permissionState: permissionState
+              })
               // Show user-friendly message for permission denial
               if (err.code === 1) {
-                if (import.meta.env.DEV) {
-                  console.warn('⚠️ Location permission denied. Emergency created but location not shared.')
-                }
+                console.warn('⚠️ Location permission denied. Emergency created but location not shared.')
+                console.warn('💡 User can share location manually on the EmergencyActive page')
                 // Don't block navigation - EmergencyActive will try again
+              } else if (err.code === 2) {
+                console.warn('⚠️ Location unavailable. Emergency created but location not shared.')
+              } else if (err.code === 3) {
+                console.warn('⚠️ Location request timed out. Emergency created but location not shared.')
               }
               resolve() // Continue navigation even if location fails
             },
