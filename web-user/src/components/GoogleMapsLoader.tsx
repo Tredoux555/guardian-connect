@@ -1,5 +1,4 @@
-import { useState, useEffect, ReactNode } from 'react'
-import { LoadScript } from '@react-google-maps/api'
+import { useState, useEffect, ReactNode, useRef } from 'react'
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 
@@ -16,18 +15,137 @@ const isGoogleMapsReady = (): boolean => {
 
 export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
   const [isReady, setIsReady] = useState(() => isGoogleMapsReady())
+  const [error, setError] = useState<string | null>(null)
+  const scriptInjectedRef = useRef(false)
+  const checkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
-    // Check periodically if maps loaded (in case it loads before LoadScript mounts)
-    if (!isReady) {
-      const interval = setInterval(() => {
+    // If already ready, nothing to do
+    if (isReady) return
+
+    // Check if script already exists
+    const existingScripts = document.querySelectorAll('script[src*="maps.googleapis.com"]')
+    if (existingScripts.length > 0) {
+      console.log('🔍 Google Maps script already exists in DOM, waiting for initialization...')
+      // Script exists, just wait for it to initialize
+      const checkReady = () => {
         if (isGoogleMapsReady()) {
           setIsReady(true)
-          clearInterval(interval)
+          if (checkIntervalRef.current) {
+            clearInterval(checkIntervalRef.current)
+            checkIntervalRef.current = null
+          }
         }
-      }, 500)
+      }
+      
+      // Check immediately and then periodically
+      checkReady()
+      checkIntervalRef.current = setInterval(checkReady, 500)
+      
+      return () => {
+        if (checkIntervalRef.current) {
+          clearInterval(checkIntervalRef.current)
+          checkIntervalRef.current = null
+        }
+      }
+    }
 
-      return () => clearInterval(interval)
+    // If no script exists and we haven't injected one, inject it
+    if (!scriptInjectedRef.current && GOOGLE_MAPS_API_KEY) {
+      scriptInjectedRef.current = true
+      console.log('🔍 Injecting Google Maps script manually...')
+      
+      // Remove any existing scripts first (cleanup)
+      const oldScripts = document.querySelectorAll('script[src*="maps.googleapis.com"]')
+      oldScripts.forEach(script => script.remove())
+      
+      // Create new script element
+      const script = document.createElement('script')
+      // Don't use callback parameter - Safari blocks it
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
+      script.async = true
+      script.defer = true
+      
+      // Detect Safari for longer wait times
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent.toLowerCase())
+      const isIOSSafari = /iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase()) && /safari/i.test(navigator.userAgent.toLowerCase()) && !/chrome|crios|fxios/i.test(navigator.userAgent.toLowerCase())
+      
+      script.onload = () => {
+        console.log('✅ Google Maps script loaded from network')
+        console.log('🔍 Waiting for window.google to be initialized...')
+        
+        // Safari needs longer wait - the global might be delayed
+        const initialDelay = isIOSSafari ? 3000 : isSafari ? 2000 : isMobile ? 1500 : 1000
+        
+        setTimeout(() => {
+          const checkGoogle = (attempts = 0) => {
+            const win = window as any
+            
+            if (win.google && typeof win.google !== 'undefined' && win.google.maps) {
+              if (win.google.maps.Map && win.google.maps.Marker) {
+                setIsReady(true)
+                console.log('✅ Google Maps API ready!')
+                if (checkIntervalRef.current) {
+                  clearInterval(checkIntervalRef.current)
+                  checkIntervalRef.current = null
+                }
+                return
+              }
+            }
+            
+            // Log progress every 10 attempts
+            if (attempts > 0 && attempts % 10 === 0) {
+              console.warn(`⚠️ Still waiting for window.google... (attempt ${attempts})`)
+              console.warn('Debug:', {
+                hasGoogle: !!win.google,
+                googleType: typeof win.google,
+                isSafari: isSafari,
+                isIOSSafari: isIOSSafari
+              })
+            }
+            
+            // Keep checking - don't give up (Safari can take 30+ seconds)
+            if (attempts < 200) { // 200 attempts * 500ms = 100 seconds max
+              setTimeout(() => checkGoogle(attempts + 1), 500)
+            } else {
+              console.error('❌ Google Maps API not available after 100 seconds')
+              console.error('❌ This is likely due to Safari privacy settings blocking cross-site tracking')
+              console.error('💡 User should disable "Prevent Cross-Site Tracking" in Safari Settings → Privacy')
+              setError('Google Maps failed to load. Safari privacy settings may be blocking it.')
+            }
+          }
+          
+          checkGoogle()
+        }, initialDelay)
+      }
+      
+      script.onerror = () => {
+        console.error('❌ Failed to load Google Maps script from network')
+        setError('Failed to load Google Maps script. Please check your internet connection and API key.')
+        scriptInjectedRef.current = false
+      }
+      
+      // Inject script into head
+      document.head.appendChild(script)
+      
+      // Also set up periodic check as fallback
+      checkIntervalRef.current = setInterval(() => {
+        if (isGoogleMapsReady()) {
+          setIsReady(true)
+          if (checkIntervalRef.current) {
+            clearInterval(checkIntervalRef.current)
+            checkIntervalRef.current = null
+          }
+        }
+      }, 1000)
+    }
+
+    return () => {
+      if (checkIntervalRef.current) {
+        clearInterval(checkIntervalRef.current)
+        checkIntervalRef.current = null
+      }
     }
   }, [isReady])
 
@@ -49,141 +167,50 @@ export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
     )
   }
 
+  if (error) {
+    return (
+      <div style={{ 
+        padding: '20px', 
+        textAlign: 'center',
+        backgroundColor: '#f8d7da',
+        border: '1px solid #dc3545',
+        borderRadius: '8px',
+        color: '#721c24'
+      }}>
+        <p style={{ margin: '0 0 10px 0', fontWeight: 'bold' }}>❌ Failed to Load Google Maps</p>
+        <p style={{ margin: '0 0 15px 0', fontSize: '0.9rem' }}>{error}</p>
+        <button
+          onClick={() => {
+            setError(null)
+            scriptInjectedRef.current = false
+            setIsReady(false)
+          }}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#dc3545',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '0.9rem'
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
   if (isReady) {
     return <>{children}</>
   }
 
   return (
-    <LoadScript 
-      googleMapsApiKey={GOOGLE_MAPS_API_KEY}
-      loadingElement={
-        <div style={{ padding: '20px', textAlign: 'center' }}>
-          <p>Loading Google Maps...</p>
-        </div>
-      }
-      onLoad={() => {
-        console.log('🔍 LoadScript onLoad fired - checking script status...')
-        
-        // First, verify the script is actually in the DOM
-        const scripts = document.querySelectorAll('script[src*="maps.googleapis.com"]')
-        console.log('🔍 Script tags found:', scripts.length)
-        if (scripts.length > 0) {
-          scripts.forEach((script, i) => {
-            const scriptEl = script as HTMLScriptElement
-            const scriptAny = scriptEl as any
-            console.log(`🔍 Script ${i}:`, scriptEl.src)
-            console.log(`🔍 Script ${i} loaded:`, scriptEl.async || scriptAny.readyState === 'complete' || scriptAny.readyState === 'loaded')
-            
-            // Check for errors
-            scriptEl.onerror = () => {
-              console.error(`❌ Script ${i} failed to load from network!`)
-              console.error('❌ This could be due to:')
-              console.error('   - Network connectivity issues')
-              console.error('   - CORS blocking')
-              console.error('   - Safari privacy settings blocking third-party scripts')
-            }
-            
-            scriptEl.onload = () => {
-              console.log(`✅ Script ${i} onload event fired`)
-            }
-          })
-        } else {
-          console.error('❌ No Google Maps script tag found in DOM!')
-          console.error('❌ LoadScript onLoad fired but script tag is missing')
-        }
-        
-        // Check if script is being blocked by checking for network errors
-        const checkNetworkStatus = () => {
-          const scripts = document.querySelectorAll('script[src*="maps.googleapis.com"]')
-          if (scripts.length > 0) {
-            const script = scripts[0] as HTMLScriptElement
-            // If script exists but google is undefined after 3 seconds, likely blocked
-            setTimeout(() => {
-              const win = window as any
-              if (!win.google) {
-                console.warn('⚠️ Script tag exists but window.google is still undefined after 3 seconds')
-                console.warn('⚠️ This suggests Safari privacy settings may be blocking the global variable')
-                console.warn('💡 User should check: Settings → Safari → Privacy → "Prevent Cross-Site Tracking"')
-              }
-            }, 3000)
-          }
-        }
-        checkNetworkStatus()
-        
-        // Now check for google object with comprehensive diagnostics
-        const checkReady = (attempt = 0) => {
-          const win = window as any
-          
-          // Check if google object exists AND has maps
-          if (win.google && typeof win.google !== 'undefined' && win.google.maps) {
-            if (win.google.maps.Map && win.google.maps.Marker) {
-              setIsReady(true)
-              console.log('✅ Google Maps API loaded successfully')
-              return
-            }
-          }
-          
-          // Log diagnostic info every 5 attempts
-          if (attempt > 0 && attempt % 5 === 0) {
-            const scriptsInDOM = document.querySelectorAll('script[src*="maps.googleapis.com"]').length
-            const allGoogleScripts = Array.from(document.querySelectorAll('script'))
-              .map(s => (s as HTMLScriptElement).src)
-              .filter(s => s && s.includes('google'))
-            
-            console.warn(`⚠️ Still waiting for Google Maps API... (attempt ${attempt})`)
-            console.warn('🔍 Diagnostic info:', {
-              hasGoogle: !!win.google,
-              googleType: typeof win.google,
-              hasMaps: !!win.google?.maps,
-              hasMapClass: !!win.google?.maps?.Map,
-              hasMarkerClass: !!win.google?.maps?.Marker,
-              scriptTagsInDOM: scriptsInDOM,
-              allGoogleScripts: allGoogleScripts,
-              userAgent: navigator.userAgent,
-              isSafari: /^((?!chrome|android).)*safari/i.test(navigator.userAgent.toLowerCase())
-            })
-            
-            // After 20 attempts (10 seconds), provide user guidance
-            if (attempt >= 20) {
-              console.error('❌ Google Maps API still not available after 10 seconds')
-              console.error('❌ Possible causes:')
-              console.error('   1. Safari privacy settings blocking cross-site tracking')
-              console.error('   2. Network connectivity issues')
-              console.error('   3. API key configuration problem')
-              console.error('   4. Script blocked by content security policy')
-            }
-          }
-          
-          // Keep checking - don't give up (but log warnings)
-          setTimeout(() => checkReady(attempt + 1), 500)
-        }
-        
-        // Start checking after delay (longer on mobile Safari)
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-        const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent.toLowerCase())
-        const initialDelay = (isMobile && isSafari) ? 2000 : isMobile ? 1500 : 1000
-        
-        console.log(`🔍 Starting readiness check after ${initialDelay}ms delay (mobile: ${isMobile}, Safari: ${isSafari})`)
-        setTimeout(() => checkReady(), initialDelay)
-      }}
-      onError={(error) => {
-        console.error('❌ Google Maps LoadScript onError:', error)
-        const scripts = document.querySelectorAll('script[src*="maps.googleapis.com"]')
-        console.error('❌ Script tags in DOM:', scripts.length)
-        if (scripts.length === 0) {
-          console.error('❌ No script tag found - LoadScript failed to inject script')
-        } else {
-          console.error('❌ Script tag exists but error occurred - check network tab for details')
-        }
-        console.error('❌ Check Safari privacy settings - "Prevent Cross-Site Tracking" may be blocking the script')
-        console.error('❌ Check browser console Network tab for failed requests to maps.googleapis.com')
-      }}
-    >
-      {isReady ? children : (
-        <div style={{ padding: '20px', textAlign: 'center' }}>
-          <p>Loading Google Maps...</p>
-        </div>
-      )}
-    </LoadScript>
+    <div style={{ padding: '20px', textAlign: 'center' }}>
+      <p>Loading Google Maps...</p>
+      <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '10px' }}>
+        This may take longer on Safari due to privacy settings
+      </p>
+    </div>
   )
 }
