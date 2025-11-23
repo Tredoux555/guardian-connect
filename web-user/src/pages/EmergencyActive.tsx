@@ -66,6 +66,17 @@ function EmergencyActive() {
   const [googleMapsUrl, setGoogleMapsUrl] = useState<string | null>(null)
   const [googleMapsUrlLoading, setGoogleMapsUrlLoading] = useState(false)
 
+  // Helper function to refresh Eruda console after important logs
+  const refreshErudaConsole = useCallback(() => {
+    if (typeof window !== 'undefined' && (window as any).eruda?._console) {
+      try {
+        (window as any).eruda._console._refresh()
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+  }, [])
+
   useEffect(() => {
     if (!id) return
 
@@ -275,13 +286,30 @@ function EmergencyActive() {
         },
         (err) => {
           // Always log geolocation errors (critical for debugging)
-          console.error('❌ Location error:', {
+          const errorDetails = {
             code: err.code,
             message: err.message,
             userId: currentUserId,
             emergencyId: id,
             isSender: senderCheck,
-          })
+            errorName: err.name,
+            protocol: window.location.protocol,
+            hostname: window.location.hostname,
+            userAgent: navigator.userAgent,
+            timestamp: new Date().toISOString()
+          }
+          
+          console.error('❌ Location error:', errorDetails)
+          
+          // Log specific error codes for better debugging
+          if (err.code === 1) {
+            console.error('❌ Error Code 1: PERMISSION_DENIED - User denied location permission')
+          } else if (err.code === 2) {
+            console.error('❌ Error Code 2: POSITION_UNAVAILABLE - Location unavailable (kCLErrorLocationUnknown)')
+          } else if (err.code === 3) {
+            console.error('❌ Error Code 3: TIMEOUT - Location request timed out')
+          }
+          
           // CRITICAL: Don't reset locationSharedRef on permission denied (code 1)
           // This prevents infinite retry loop on HTTP/iPhone
           // Only reset on other errors (timeout, unavailable)
@@ -294,6 +322,15 @@ function EmergencyActive() {
               isSender: senderCheck,
             })
             console.info('💡 Tip: Geolocation requires HTTPS (or localhost). Use HTTPS or enable location manually.')
+          } else if (err.code === 2) {
+            // Position unavailable (kCLErrorLocationUnknown on iOS) - this is a temporary error
+            // Don't mark as shared, allow retry but with longer delay
+            console.warn('⚠️ Location unavailable (kCLErrorLocationUnknown). This may be temporary.', {
+              userId: currentUserId,
+              isSender: senderCheck,
+              suggestion: 'Location services may need time to acquire GPS signal. Try again in a few seconds.'
+            })
+            locationSharedRef.current = false // Allow retry
           } else {
             // Other errors (timeout, unavailable) - allow retry
             locationSharedRef.current = false
@@ -359,20 +396,52 @@ function EmergencyActive() {
       // Process locations with validation
       const locationsData = response.data.locations || []
       
+      // DEBUG: Log locations received from API
+      console.log('📍 [DEBUG] Locations received from API:', {
+        count: locationsData.length,
+        locations: locationsData,
+        emergencyId: id,
+        timestamp: new Date().toISOString(),
+        responseKeys: Object.keys(response.data)
+      })
+      
       // Validate and filter locations using unified coordinate parsing
       const validLocations = locationsData.filter((loc: Location) => {
-        if (!loc || !loc.user_id) return false
+        if (!loc || !loc.user_id) {
+          console.warn('⚠️ [DEBUG] Invalid location (missing user_id):', loc)
+          return false
+        }
         const lat = parseCoordinate(loc.latitude)
         const lng = parseCoordinate(loc.longitude)
-        return !isNaN(lat) && !isNaN(lng) && 
+        const isValid = !isNaN(lat) && !isNaN(lng) && 
                lat >= -90 && lat <= 90 && 
                lng >= -180 && lng <= 180
+        if (!isValid) {
+          console.warn('⚠️ [DEBUG] Invalid location coordinates:', { 
+            loc, 
+            parsedLat: lat, 
+            parsedLng: lng,
+            rawLat: loc.latitude,
+            rawLng: loc.longitude
+          })
+        }
+        return isValid
+      })
+      
+      console.log('📍 [DEBUG] Valid locations after filtering:', {
+        count: validLocations.length,
+        locations: validLocations
       })
       
       // Remove duplicate locations by user_id (keep most recent)
       const uniqueLocations = validLocations.filter((loc: Location, index: number, self: Location[]) => 
         index === self.findIndex((l: Location) => String(l.user_id) === String(loc.user_id))
       )
+      
+      console.log('📍 [DEBUG] Unique locations after deduplication:', {
+        count: uniqueLocations.length,
+        locations: uniqueLocations
+      })
       
       if (uniqueLocations.length > 0) {
         // Find sender location for reference
@@ -381,6 +450,12 @@ function EmergencyActive() {
         )
         if (senderLoc) {
           setSenderLocation(senderLoc)
+          console.log('✅ [DEBUG] Sender location set:', senderLoc)
+        } else {
+          console.warn('⚠️ [DEBUG] Sender location not found in unique locations', {
+            senderUserId: emergencyData.user_id,
+            uniqueLocationUserIds: uniqueLocations.map(l => l.user_id)
+          })
         }
         
         setLocations(uniqueLocations)
@@ -392,16 +467,32 @@ function EmergencyActive() {
           const avgLng = uniqueLocations.reduce((sum: number, loc: Location) => 
             sum + parseCoordinate(loc.longitude), 0) / uniqueLocations.length
           setMapCenter({ lat: avgLat, lng: avgLng })
+          console.log('✅ [DEBUG] Setting map center (multiple locations):', { lat: avgLat, lng: avgLng })
         } else {
           // Single location - center on it using unified coordinate parsing
           const loc = uniqueLocations[0]
-          setMapCenter({
-            lat: parseCoordinate(loc.latitude),
-            lng: parseCoordinate(loc.longitude),
-          })
+          const centerLat = parseCoordinate(loc.latitude)
+          const centerLng = parseCoordinate(loc.longitude)
+          setMapCenter({ lat: centerLat, lng: centerLng })
+          console.log('✅ [DEBUG] Setting map center (single location):', { lat: centerLat, lng: centerLng })
         }
+        
+        console.log('✅ [DEBUG] Locations set on map successfully:', {
+          count: uniqueLocations.length,
+          mapCenter: uniqueLocations.length > 1 
+            ? { lat: uniqueLocations.reduce((sum: number, loc: Location) => sum + parseCoordinate(loc.latitude), 0) / uniqueLocations.length, 
+                lng: uniqueLocations.reduce((sum: number, loc: Location) => sum + parseCoordinate(loc.longitude), 0) / uniqueLocations.length }
+            : { lat: parseCoordinate(uniqueLocations[0].latitude), lng: parseCoordinate(uniqueLocations[0].longitude) }
+        })
       } else {
         // No valid locations yet
+        console.warn('⚠️ [DEBUG] No valid locations to display on map', {
+          locationsDataCount: locationsData.length,
+          validLocationsCount: validLocations.length,
+          uniqueLocationsCount: uniqueLocations.length,
+          emergencyId: id,
+          senderUserId: emergencyData.user_id
+        })
         setLocations([])
         setSenderLocation(null)
       }

@@ -42,20 +42,41 @@ if (typeof window !== 'undefined') {
     window.location.hostname.includes('127.0.0.1')
 
   if (shouldLoadEruda) {
-    // Dynamically load Eruda from CDN
-    const script = document.createElement('script')
-    script.src = 'https://cdn.jsdelivr.net/npm/eruda'
-    script.onload = () => {
-      // Initialize Eruda after it loads
+    // Initialize Eruda immediately with inline script to capture early logs
+    const initEruda = () => {
       if ((window as any).eruda) {
         (window as any).eruda.init()
         console.log('✅ Eruda console initialized')
+        // Force Eruda to refresh its log display after a short delay
+        setTimeout(() => {
+          try {
+            if ((window as any).eruda?._console) {
+              (window as any).eruda._console._refresh()
+            }
+            // Also try to show Eruda if it's hidden
+            if ((window as any).eruda?._tool) {
+              (window as any).eruda._tool.show()
+            }
+          } catch (e) {
+            // Ignore errors
+          }
+        }, 200)
       }
     }
-    script.onerror = () => {
-      console.error('❌ Failed to load Eruda')
+    
+    // Check if Eruda is already loaded
+    if ((window as any).eruda) {
+      initEruda()
+    } else {
+      // Dynamically load Eruda from CDN
+      const script = document.createElement('script')
+      script.src = 'https://cdn.jsdelivr.net/npm/eruda'
+      script.onload = initEruda
+      script.onerror = () => {
+        console.error('❌ Failed to load Eruda')
+      }
+      document.head.appendChild(script)
     }
-    document.head.appendChild(script)
   }
 }
 
