@@ -12,8 +12,16 @@ const STORAGE_KEY = 'coordinate_trace_logs'
 
 class LogCollector {
   private logs: LogEntry[] = []
+  private originalLog: typeof console.log
+  private originalWarn: typeof console.warn
+  private originalError: typeof console.error
 
   constructor() {
+    // Store original console methods BEFORE overriding
+    this.originalLog = console.log.bind(console)
+    this.originalWarn = console.warn.bind(console)
+    this.originalError = console.error.bind(console)
+    
     // Load existing logs from localStorage
     this.loadLogs()
     
@@ -40,27 +48,24 @@ class LogCollector {
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.logs))
     } catch (e) {
-      console.warn('Failed to save logs to localStorage', e)
+      // Use originalWarn to avoid recursion
+      this.originalWarn('Failed to save logs to localStorage', e)
     }
   }
 
   private setupConsoleCapture() {
-    const originalLog = console.log
-    const originalWarn = console.warn
-    const originalError = console.error
-
     console.log = (...args: any[]) => {
-      originalLog.apply(console, args)
+      this.originalLog.apply(console, args)
       this.captureLog('log', args)
     }
 
     console.warn = (...args: any[]) => {
-      originalWarn.apply(console, args)
+      this.originalWarn.apply(console, args)
       this.captureLog('warn', args)
     }
 
     console.error = (...args: any[]) => {
-      originalError.apply(console, args)
+      this.originalError.apply(console, args)
       this.captureLog('error', args)
     }
   }
@@ -110,8 +115,8 @@ class LogCollector {
     this.logs.push(entry)
     this.saveLogs()
     
-    // Also log to console for immediate visibility
-    console.log(`📝 [LOG COLLECTOR] Captured: ${entry.step}`)
+    // Use originalLog to avoid recursion (don't use overridden console.log)
+    this.originalLog(`📝 [LOG COLLECTOR] Captured: ${entry.step}`)
   }
 
   getAllLogs(): LogEntry[] {
