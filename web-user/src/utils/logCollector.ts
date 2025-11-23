@@ -73,6 +73,12 @@ class LogCollector {
   private captureLog(type: 'log' | 'warn' | 'error', args: any[]) {
     // Only capture coordinate trace logs
     const message = args[0]?.toString() || ''
+    
+    // IMPORTANT: Skip log collector's own messages to prevent recursion
+    if (message.includes('📝 [LOG COLLECTOR]') || message.includes('[LOG COLLECTOR]')) {
+      return // Don't capture our own log messages
+    }
+    
     if (message.includes('[COORDINATE TRACE]') || 
         message.includes('Device GPS') ||
         message.includes('Sending to backend') ||
