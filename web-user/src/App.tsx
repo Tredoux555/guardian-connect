@@ -8,7 +8,7 @@ import Contacts from './pages/Contacts'
 import Donations from './pages/Donations'
 import Subscriptions from './pages/Subscriptions'
 import { FEATURES } from './utils/featureFlags'
-import { registerServiceWorker, requestNotificationPermission, subscribeToPushNotifications, showEmergencyNotification, playEmergencySound } from './services/notifications'
+import { registerServiceWorker, requestNotificationPermission, subscribeToPushNotifications, showEmergencyNotification, playEmergencySound, stopEmergencySound } from './services/notifications'
 import { connectSocket, onEmergencyCreated, removeListener } from './services/socket'
 import { getCurrentUserId } from './utils/jwt'
 import './App.css'
@@ -39,6 +39,28 @@ function App() {
     initializeNotifications()
   }, [])
 
+  // Listen for service worker messages (notification clicks)
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      const handleMessage = (event: MessageEvent) => {
+        if (event.data && event.data.type === 'EMERGENCY_NOTIFICATION_CLICKED') {
+          // User clicked notification - this is user interaction, so sound can play
+          console.log('🔔 Notification clicked - starting emergency sound (user interaction)')
+          playEmergencySound()
+        } else if (event.data && event.data.type === 'STOP_EMERGENCY_SOUND') {
+          // Stop sound if requested
+          stopEmergencySound()
+        }
+      }
+
+      navigator.serviceWorker.addEventListener('message', handleMessage)
+
+      return () => {
+        navigator.serviceWorker.removeEventListener('message', handleMessage)
+      }
+    }
+  }, [])
+
   // Listen for emergency_created socket events and show notification with sound
   useEffect(() => {
     const token = localStorage.getItem('access_token')
@@ -62,7 +84,7 @@ function App() {
         // Get sender name from data
         const senderName = data.senderName || data.senderEmail || 'Someone'
         
-        // Show notification with sound
+        // Show notification (sound will play when user clicks notification - user interaction required on mobile)
         await showEmergencyNotification(
           '🚨 Emergency Alert',
           `${senderName} needs help!`,
@@ -70,12 +92,14 @@ function App() {
           senderName
         )
         
-        // Ensure sound plays (showEmergencyNotification already calls playEmergencySound, but ensure it)
-        playEmergencySound()
+        // Note: On mobile, AudioContext requires user interaction to play sound
+        // So we don't call playEmergencySound() here - it will play when user clicks notification
+        // The service worker will send EMERGENCY_NOTIFICATION_CLICKED message, which triggers sound
         
-        console.log('🔔 Emergency notification and sound triggered:', {
+        console.log('🔔 Emergency notification triggered:', {
           emergencyId: data.emergencyId,
-          senderName
+          senderName,
+          note: 'Sound will play when user clicks notification (user interaction required on mobile)'
         })
       } catch (error) {
         console.error('Error handling emergency created event:', error)
