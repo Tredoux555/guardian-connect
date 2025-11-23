@@ -43,8 +43,8 @@ export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const scriptLoadingRef = useRef(false)
-  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const checkIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const checkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Cleanup function
   const cleanup = () => {
