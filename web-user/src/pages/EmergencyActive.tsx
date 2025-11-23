@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { GoogleMap, Marker, InfoWindow } from '@react-google-maps/api'
+import { OpenLocationCode } from 'open-location-code'
 import api from '../services/api'
 import { getCurrentUserId } from '../utils/jwt'
 import { GoogleMapsLoader } from '../components/GoogleMapsLoader'
@@ -658,12 +659,25 @@ function EmergencyActive() {
   }
 
   /**
-   * Generate Google Maps navigation URL using exact coordinates
+   * Convert coordinates to Google Plus Code (Open Location Code)
+   * Plus Codes are designed to represent exact GPS coordinates without geocoding
+   */
+  const coordinatesToPlusCode = (lat: number, lng: number): string => {
+    try {
+      const olc = new OpenLocationCode()
+      return olc.encode(lat, lng)
+    } catch (error) {
+      console.error('Error converting coordinates to Plus Code:', error)
+      // Fallback to empty string - will use coordinates instead
+      return ''
+    }
+  }
+
+  /**
+   * Generate Google Maps navigation URL using Plus Codes for exact coordinate navigation
+   * Plus Codes prevent Google Maps from reverse-geocoding coordinates to addresses
    * On mobile, use "My Location" as origin so Google Maps uses device GPS
    * On desktop, use exact coordinates from locations array
-   * This ensures Google Maps uses GPS coordinates directly, not geocoded addresses
-   * Using coordinates directly prevents the "same location" error when both places
-   * geocode to the same district (e.g., "Haidian District, Beijing, China")
    */
   const getGoogleMapsUrl = (
     originLat: string | number, 
@@ -672,76 +686,88 @@ function EmergencyActive() {
     destLng: string | number
   ): string => {
     try {
-      // Format all coordinates as strings with exact precision
-      const formattedDestLat = formatCoordinate(destLat)
-      const formattedDestLng = formatCoordinate(destLng)
+      // Parse coordinates to numbers
+      const destLatNum = typeof destLat === 'string' ? parseFloat(destLat) : destLat
+      const destLngNum = typeof destLng === 'string' ? parseFloat(destLng) : destLng
       
       // Validate destination coordinates
-      if (formattedDestLat === '0' || formattedDestLng === '0') {
+      if (isNaN(destLatNum) || isNaN(destLngNum) || destLatNum === 0 || destLngNum === 0) {
         throw new Error('Invalid destination coordinates')
       }
+      
+      // Convert destination to Plus Code
+      const destPlusCode = coordinatesToPlusCode(destLatNum, destLngNum)
       
       // Detect mobile device
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
       
       if (isMobile) {
         // On mobile: Use destination only - Google Maps uses device GPS
-        // Format: destination=lat,lng (standard format - @ prefix not supported in destination param)
-        // The coordinates are precise enough (8 decimals) that geocoding should be minimal
-        const url = `https://www.google.com/maps/dir/?api=1&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
+        // Use Plus Code in search format - Google Maps recognizes Plus Codes as exact locations
+        const url = destPlusCode 
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destPlusCode)}`
+          : `https://www.google.com/maps/dir/?api=1&destination=${destLatNum},${destLngNum}&travelmode=driving`
+        
         console.log('🔗 Step 9: Final Google Maps URL (Mobile):', {
           url,
-          destinationCoords: `${formattedDestLat},${formattedDestLng}`,
-          formattedLat: formattedDestLat,
-          formattedLng: formattedDestLng,
+          destinationPlusCode: destPlusCode,
+          destinationCoords: `${destLatNum},${destLngNum}`,
+          formattedLat: destLatNum,
+          formattedLng: destLngNum,
           userAgent: navigator.userAgent,
           isMobile: true,
-          note: 'Using standard destination=lat,lng format (8 decimal precision)'
+          note: destPlusCode ? 'Using Plus Code for exact location (no geocoding)' : 'Fallback to coordinates'
         })
         return url
       } else {
         // On desktop: Use exact origin and destination
-        const formattedOriginLat = formatCoordinate(originLat)
-        const formattedOriginLng = formatCoordinate(originLng)
+        const originLatNum = typeof originLat === 'string' ? parseFloat(originLat) : originLat
+        const originLngNum = typeof originLng === 'string' ? parseFloat(originLng) : originLng
         
         // Validate origin
-        if (formattedOriginLat === '0' || formattedOriginLng === '0') {
-          const destCoords = `${formattedDestLat},${formattedDestLng}`
-          // Use search format with @ prefix for query parameter (this format supports @)
-          return `https://www.google.com/maps/search/?api=1&query=@${destCoords}`
+        if (isNaN(originLatNum) || isNaN(originLngNum) || originLatNum === 0 || originLngNum === 0) {
+          // No valid origin - use search format with Plus Code
+          const url = destPlusCode
+            ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destPlusCode)}`
+            : `https://www.google.com/maps/search/?api=1&query=${destLatNum},${destLngNum}`
+          return url
         }
         
         // Check if origin and destination are identical
-        if (formattedOriginLat === formattedDestLat && formattedOriginLng === formattedDestLng) {
-          const destCoords = `${formattedDestLat},${formattedDestLng}`
-          return `https://www.google.com/maps/search/?api=1&query=@${destCoords}`
+        if (Math.abs(originLatNum - destLatNum) < 0.0001 && Math.abs(originLngNum - destLngNum) < 0.0001) {
+          const url = destPlusCode
+            ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destPlusCode)}`
+            : `https://www.google.com/maps/search/?api=1&query=${destLatNum},${destLngNum}`
+          return url
         }
         
-        // Use standard format: origin=lat,lng&destination=lat,lng
-        // The @ prefix is NOT supported in origin/destination parameters for directions
-        // 8 decimal precision should minimize geocoding inaccuracies
-        const url = `https://www.google.com/maps/dir/?api=1&origin=${formattedOriginLat},${formattedOriginLng}&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
+        // Convert origin to Plus Code
+        const originPlusCode = coordinatesToPlusCode(originLatNum, originLngNum)
+        
+        // Use Plus Codes in directions URL
+        // Note: Google Maps directions API may not support Plus Codes directly in origin/destination
+        // So we'll use search format with Plus Code, or fallback to coordinates
+        const url = destPlusCode
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destPlusCode)}`
+          : `https://www.google.com/maps/dir/?api=1&origin=${originLatNum},${originLngNum}&destination=${destLatNum},${destLngNum}&travelmode=driving`
+        
         console.log('🔗 Step 9: Final Google Maps URL (Desktop):', {
           url,
-          origin: `${formattedOriginLat},${formattedOriginLng}`,
-          destination: `${formattedDestLat},${formattedDestLng}`,
-          formattedOriginLat,
-          formattedOriginLng,
-          formattedDestLat,
-          formattedDestLng,
-          note: 'Using standard origin/destination format (8 decimal precision)'
+          originPlusCode,
+          destinationPlusCode: destPlusCode,
+          origin: `${originLatNum},${originLngNum}`,
+          destination: `${destLatNum},${destLngNum}`,
+          note: destPlusCode ? 'Using Plus Code for exact location (no geocoding)' : 'Fallback to coordinates'
         })
         return url
       }
       
     } catch (error) {
       console.error('Error generating Google Maps URL:', error)
-      // Fallback to destination only using string values
-      const formattedDestLat = formatCoordinate(destLat)
-      const formattedDestLng = formatCoordinate(destLng)
-      const destCoords = `${formattedDestLat},${formattedDestLng}`
-      // Use search format with @ prefix (this format supports @ in query parameter)
-      return `https://www.google.com/maps/search/?api=1&query=@${destCoords}`
+      // Fallback to destination only using coordinates
+      const destLatNum = typeof destLat === 'string' ? parseFloat(destLat) : destLat
+      const destLngNum = typeof destLng === 'string' ? parseFloat(destLng) : destLng
+      return `https://www.google.com/maps/search/?api=1&query=${destLatNum},${destLngNum}`
     }
   }
 
