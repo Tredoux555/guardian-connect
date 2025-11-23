@@ -686,10 +686,10 @@ function EmergencyActive() {
       
       if (isMobile) {
         // On mobile: Use destination only - Google Maps uses device GPS
-        // URL-encode the exact coordinate string
+        // Use coordinates directly without encoding comma - Google Maps parses coordinates better this way
         const destCoords = `${formattedDestLat},${formattedDestLng}`
-        const encodedDest = encodeURIComponent(destCoords)
-        return `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+        // Remove dir_action=navigate to prevent geocoding - use raw coordinates
+        return `https://www.google.com/maps/dir/?api=1&destination=${destCoords}&travelmode=driving`
       } else {
         // On desktop: Use exact origin and destination
         const formattedOriginLat = formatCoordinate(originLat)
@@ -698,22 +698,21 @@ function EmergencyActive() {
         // Validate origin
         if (formattedOriginLat === '0' || formattedOriginLng === '0') {
           const destCoords = `${formattedDestLat},${formattedDestLng}`
-          const encodedDest = encodeURIComponent(destCoords)
-          return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+          // Use coordinates directly - no encoding needed for comma
+          return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
         }
         
         // Check if origin and destination are identical
         if (formattedOriginLat === formattedDestLat && formattedOriginLng === formattedDestLng) {
           const destCoords = `${formattedDestLat},${formattedDestLng}`
-          const encodedDest = encodeURIComponent(destCoords)
-          return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+          return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
         }
         
         const originCoords = `${formattedOriginLat},${formattedOriginLng}`
         const destCoords = `${formattedDestLat},${formattedDestLng}`
-        const encodedOrigin = encodeURIComponent(originCoords)
-        const encodedDest = encodeURIComponent(destCoords)
-        return `https://www.google.com/maps/dir/?api=1&origin=${encodedOrigin}&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+        // Use coordinates directly without encoding - Google Maps parses coordinates better this way
+        // Remove dir_action=navigate to prevent geocoding
+        return `https://www.google.com/maps/dir/?api=1&origin=${originCoords}&destination=${destCoords}&travelmode=driving`
       }
       
     } catch (error) {
@@ -722,8 +721,8 @@ function EmergencyActive() {
       const formattedDestLat = formatCoordinate(destLat)
       const formattedDestLng = formatCoordinate(destLng)
       const destCoords = `${formattedDestLat},${formattedDestLng}`
-      const encodedDest = encodeURIComponent(destCoords)
-      return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+      // Use coordinates directly without encoding
+      return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
     }
   }
 
@@ -1041,13 +1040,12 @@ function EmergencyActive() {
               // On mobile: Send only destination - Google Maps automatically uses device GPS
               // CRITICAL: Use already-formatted strings to preserve precision
               const destCoords = `${formattedDestLat},${formattedDestLng}`
-              const encodedDest = encodeURIComponent(destCoords)
-              url = `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+              // Use coordinates directly without encoding - prevents geocoding
+              url = `https://www.google.com/maps/dir/?api=1&destination=${destCoords}&travelmode=driving`
             } else {
               // On desktop: Fallback to destination only
               const destCoords = `${formattedDestLat},${formattedDestLng}`
-              const encodedDest = encodeURIComponent(destCoords)
-              url = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+              url = `https://www.google.com/maps/search/?api=1&query=${destCoords}`
             }
           }
         } else {
@@ -1056,13 +1054,12 @@ function EmergencyActive() {
             // On mobile: Send only destination - Google Maps automatically uses device GPS for origin
             // CRITICAL: Use already-formatted strings to preserve precision
             const destCoords = `${formattedDestLat},${formattedDestLng}`
-            const encodedDest = encodeURIComponent(destCoords)
-            url = `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+            // Use coordinates directly without encoding - prevents geocoding
+            url = `https://www.google.com/maps/dir/?api=1&destination=${destCoords}&travelmode=driving`
           } else {
             // On desktop: Use destination only
             const destCoords = `${formattedDestLat},${formattedDestLng}`
-            const encodedDest = encodeURIComponent(destCoords)
-            url = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+            url = `https://www.google.com/maps/search/?api=1&query=${destCoords}`
           }
         }
         
