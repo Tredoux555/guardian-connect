@@ -408,16 +408,10 @@ function EmergencyActive() {
         
         setLocations(uniqueLocations)
         
-        // Center map on midpoint of all locations using unified coordinate parsing
+        // Map removed - no need to set center
         if (uniqueLocations.length > 1) {
-          const avgLat = uniqueLocations.reduce((sum: number, loc: Location) => 
-            sum + parseCoordinate(loc.latitude), 0) / uniqueLocations.length
-          const avgLng = uniqueLocations.reduce((sum: number, loc: Location) => 
-            sum + parseCoordinate(loc.longitude), 0) / uniqueLocations.length
-          setMapCenter({ lat: avgLat, lng: avgLng })
-          console.log('✅ [DEBUG] Setting map center (multiple locations):', { lat: avgLat, lng: avgLng })
+          console.log('✅ [DEBUG] Multiple locations found:', { count: uniqueLocations.length })
         } else {
-          // Map removed - no need to set center
           console.log('✅ [DEBUG] Single location found:', { loc: uniqueLocations[0] })
         }
         
