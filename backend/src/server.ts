@@ -18,10 +18,7 @@ dotenv.config();
 
 const app: Express = express();
 const httpServer = createServer(app);
-const PORT = parseInt(process.env.PORT || '3001', 10);
-
-// Trust proxy - required for Railway's reverse proxy and rate limiting
-app.set('trust proxy', true);
+const PORT = process.env.PORT || 3000;
 
 // Initialize Socket.io
 initializeSocket(httpServer);
@@ -31,86 +28,41 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 // CORS configuration - allow all localhost ports for development
-// Also allow network IP addresses for phone access
-// Get current network IP dynamically
-const getNetworkIP = (): string => {
-  // Try to get from environment variable first
-  if (process.env.NETWORK_IP) {
-    return process.env.NETWORK_IP;
-  }
-  // Default to common network IP (update if needed)
-  return '192.168.1.3';
-};
-const networkIP = getNetworkIP(); // Your local network IP
-// Parse ALLOWED_ORIGINS, filtering out empty strings
-const parseAllowedOrigins = (): string[] => {
-  if (!process.env.ALLOWED_ORIGINS) {
-    return [];
-  }
-  return process.env.ALLOWED_ORIGINS
-    .split(',')
-    .map(o => o.trim())
-    .filter(o => o.length > 0); // Remove empty strings
-};
-
-const envAllowedOrigins = parseAllowedOrigins();
-const allowedOrigins = envAllowedOrigins.length > 0 ? envAllowedOrigins : [
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [
   'http://localhost:3002', // Admin panel (default)
   'http://localhost:3003', // Web user interface (default)
   'http://localhost:3004', // Admin panel (alternative port)
   'http://localhost:3005', // Web user interface (alternative port)
   'http://localhost:3000', // Mobile app (if using web)
-  `http://${networkIP}:3002`, // Admin panel (network)
-  `http://${networkIP}:3003`, // Web user interface (network)
-  `http://${networkIP}:3004`, // Admin panel (network alternative)
-  `http://${networkIP}:3005`, // Web user interface (network alternative)
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
-    try {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) {
-        console.log('✅ CORS: Allowing request with no origin');
-        return callback(null, true);
-      }
-      
-      // In development, allow ALL origins for easier testing
-      // This prevents CORS issues when frontend and backend are on different IPs/ports
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('✅ CORS: Allowing origin in development:', origin);
-        return callback(null, true);
-      }
-      
-      // In production, check allowed origins
-      // If ALLOWED_ORIGINS is not set or empty, allow all (for initial setup)
-      if (!process.env.ALLOWED_ORIGINS || envAllowedOrigins.length === 0) {
-        console.warn('⚠️ CORS: ALLOWED_ORIGINS not set or empty, allowing all origins (not recommended for production)');
-        console.warn('⚠️ CORS: Set ALLOWED_ORIGINS environment variable for production security');
-        return callback(null, true);
-      }
-      
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        console.log('✅ CORS: Allowing origin from allowed list:', origin);
-        return callback(null, true);
-      } else {
-        console.warn('❌ CORS: Blocked origin:', origin);
-        console.warn('❌ CORS: Allowed origins:', allowedOrigins);
-        // Return false instead of error to properly reject CORS
-        return callback(null, false);
-      }
-    } catch (error: any) {
-      console.error('❌ CORS: Error in origin callback:', error);
-      console.error('❌ CORS: Error stack:', error?.stack);
-      // On error, allow the request to prevent complete failure (but log it)
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      console.log('✅ CORS: Allowing request with no origin');
       return callback(null, true);
+    }
+    
+    // In development, allow ALL origins for easier testing
+    // This prevents CORS issues when frontend and backend are on different IPs/ports
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('✅ CORS: Allowing origin in development:', origin);
+      return callback(null, true);
+    }
+    
+    // In production, check allowed origins
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      console.log('✅ CORS: Allowing origin from allowed list:', origin);
+      callback(null, true);
+    } else {
+      console.warn('❌ CORS: Blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -137,69 +89,6 @@ app.get('/', (req, res) => {
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Diagnostic endpoint to check backend configuration
-app.get('/api/diagnostic', async (req, res) => {
-  const diagnostics: any = {
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    checks: {},
-  };
-
-  // Check database connection
-  try {
-    const { query } = await import('./database/db');
-    const result = await query('SELECT NOW() as current_time');
-    diagnostics.checks.database = {
-      status: 'connected',
-      currentTime: result.rows[0]?.current_time,
-    };
-  } catch (error: any) {
-    diagnostics.checks.database = {
-      status: 'error',
-      error: error.message,
-      code: error.code,
-    };
-  }
-
-  // Check if users table exists
-  try {
-    const { query } = await import('./database/db');
-    const result = await query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = 'users'
-      );
-    `);
-    diagnostics.checks.usersTable = {
-      exists: result.rows[0]?.exists || false,
-    };
-  } catch (error: any) {
-    diagnostics.checks.usersTable = {
-      exists: false,
-      error: error.message,
-    };
-  }
-
-  // Check environment variables
-  diagnostics.checks.env = {
-    JWT_SECRET: process.env.JWT_SECRET ? 'set' : 'missing',
-    JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET ? 'set' : 'missing',
-    NODE_ENV: process.env.NODE_ENV || 'not set',
-    DB_HOST: process.env.PGHOST || process.env.DB_HOST || 'not set',
-    DB_NAME: process.env.PGDATABASE || process.env.DB_NAME || 'not set',
-    ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || 'not set',
-  };
-
-  // Determine overall status
-  const hasErrors = 
-    diagnostics.checks.database?.status === 'error' ||
-    !diagnostics.checks.usersTable?.exists ||
-    diagnostics.checks.env.JWT_SECRET === 'missing';
-
-  res.status(hasErrors ? 500 : 200).json(diagnostics);
 });
 
 // Routes

@@ -1,13 +1,12 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { useEffect, Suspense, lazy } from 'react'
+import { useEffect } from 'react'
 import Login from './pages/Login'
 import Home from './pages/Home'
 import EmergencyActive from './pages/EmergencyActive'
 import EmergencyResponse from './pages/EmergencyResponse'
 import Contacts from './pages/Contacts'
-// Lazy load Stripe pages - only loads when route is accessed (prevents Stripe initialization errors)
-const Donations = lazy(() => import('./pages/Donations'))
-const Subscriptions = lazy(() => import('./pages/Subscriptions'))
+import Donations from './pages/Donations'
+import Subscriptions from './pages/Subscriptions'
 import { FEATURES } from './utils/featureFlags'
 import { registerServiceWorker, requestNotificationPermission, subscribeToPushNotifications } from './services/notifications'
 import './App.css'
@@ -51,30 +50,8 @@ function App() {
         <Route path="/emergency/:id" element={<ProtectedRoute><EmergencyActive /></ProtectedRoute>} />
         <Route path="/respond/:id" element={<ProtectedRoute><EmergencyResponse /></ProtectedRoute>} />
         <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
-        {FEATURES.donations && (
-          <Route 
-            path="/donations" 
-            element={
-              <ProtectedRoute>
-                <Suspense fallback={<div className="loading" style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}>
-                  <Donations />
-                </Suspense>
-              </ProtectedRoute>
-            } 
-          />
-        )}
-        {FEATURES.subscriptions && (
-          <Route 
-            path="/subscriptions" 
-            element={
-              <ProtectedRoute>
-                <Suspense fallback={<div className="loading" style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}>
-                  <Subscriptions />
-                </Suspense>
-              </ProtectedRoute>
-            } 
-          />
-        )}
+        {FEATURES.donations && <Route path="/donations" element={<ProtectedRoute><Donations /></ProtectedRoute>} />}
+        {FEATURES.subscriptions && <Route path="/subscriptions" element={<ProtectedRoute><Subscriptions /></ProtectedRoute>} />}
       </Routes>
     </Router>
   )

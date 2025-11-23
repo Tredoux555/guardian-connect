@@ -1,5 +1,5 @@
 import { query, transaction } from '../database/db';
-import { Emergency as EmergencyType, EmergencyParticipant } from '../types';
+import { Emergency as EmergencyType, EmergencyParticipant } from '../../../shared/types';
 import { v4 as uuidv4 } from 'uuid';
 
 export class Emergency {
@@ -120,28 +120,6 @@ export class Emergency {
        ORDER BY el.user_id, el.timestamp DESC`,
       [emergencyId]
     );
-    
-    // STEP 5: Log retrieved locations from database (detailed)
-    if (result.rows.length > 0) {
-      console.log('🔍 [COORDINATE TRACE] Step 5 - Backend retrieved from database:', {
-        emergencyId,
-        count: result.rows.length,
-        locations: result.rows.map((row: any) => ({
-          userId: row.user_id,
-          latitude: row.latitude,
-          longitude: row.longitude,
-          latitudeType: typeof row.latitude,
-          longitudeType: typeof row.longitude,
-          latitudeString: String(row.latitude),
-          longitudeString: String(row.longitude),
-          latitudePrecision: String(row.latitude).split('.')[1]?.length || 0,
-          longitudePrecision: String(row.longitude).split('.')[1]?.length || 0,
-          timestamp: row.timestamp,
-          note: 'These values will be sent to frontend in API response'
-        }))
-      });
-    }
-    
     return result.rows;
   }
 }

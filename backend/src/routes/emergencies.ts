@@ -143,21 +143,11 @@ router.post(
       // Update participant status to accepted
       await Emergency.updateParticipantStatus(emergencyId, userId, 'accepted');
 
-      // Get user's display name for socket event
-      const userResult = await query(
-        'SELECT display_name, email FROM users WHERE id = $1',
-        [userId]
-      );
-      const user = userResult.rows[0] || { email: participant.user_email };
-      const userDisplayName = getUserDisplayName(user);
-
       // Emit socket event to all participants
       emitToEmergency(emergencyId, 'participant_accepted', {
         emergencyId,
         userId,
-        userName: userDisplayName,
-        user_email: user.email,
-        user_display_name: userDisplayName,
+        userName: participant.user_email,
       });
 
       res.json({
@@ -232,19 +222,6 @@ router.post(
       const userId = req.userId!;
       const { latitude, longitude } = req.body;
 
-      // STEP 2: Log received coordinates from client (detailed)
-      console.log('🔍 [COORDINATE TRACE] Step 2 - Backend received from client:', {
-        emergencyId,
-        userId,
-        receivedLatitude: latitude,
-        receivedLongitude: longitude,
-        latitudeType: typeof latitude,
-        longitudeType: typeof longitude,
-        latitudeString: String(latitude),
-        longitudeString: String(longitude),
-        timestamp: new Date().toISOString()
-      });
-
       // Verify emergency exists and is active
       const emergency = await Emergency.findById(emergencyId);
       if (!emergency || emergency.status !== 'active') {
@@ -262,41 +239,8 @@ router.post(
         });
       }
 
-      // STEP 3: Validate and parse coordinates before storing
-      const lat = typeof latitude === 'string' ? parseFloat(latitude) : Number(latitude);
-      const lng = typeof longitude === 'string' ? parseFloat(longitude) : Number(longitude);
-      
-      console.log('🔍 [COORDINATE TRACE] Step 3 - Backend parsed coordinates:', {
-        receivedLat: latitude,
-        receivedLng: longitude,
-        parsedLat: lat,
-        parsedLng: lng,
-        latIsNaN: isNaN(lat),
-        lngIsNaN: isNaN(lng),
-        latPrecision: lat.toString().split('.')[1]?.length || 0,
-        lngPrecision: lng.toString().split('.')[1]?.length || 0
-      });
-      
-      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        console.error('❌ Invalid coordinates received:', { latitude, longitude, lat, lng });
-        return res.status(400).json({ error: 'Invalid coordinates' });
-      }
-
-      // STEP 4: Store in database (DECIMAL(10,8) and DECIMAL(11,8))
-      await Emergency.addLocation(emergencyId, userId, lat, lng);
-      
-      console.log('🔍 [COORDINATE TRACE] Step 4 - Backend stored in database:', {
-        emergencyId,
-        userId,
-        storedLatitude: lat,
-        storedLongitude: lng,
-        storedLatType: typeof lat,
-        storedLngType: typeof lng,
-        storedLatString: String(lat),
-        storedLngString: String(lng),
-        databasePrecision: 'DECIMAL(10,8) for latitude, DECIMAL(11,8) for longitude',
-        note: 'PostgreSQL will store with exact precision, but may return as string or number'
-      });
+      // Add location
+      await Emergency.addLocation(emergencyId, userId, latitude, longitude);
 
       // Get user's display name and email for socket event
       const userResult = await query(
