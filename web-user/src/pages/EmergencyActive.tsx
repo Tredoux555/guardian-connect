@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { getCurrentUserId } from '../utils/jwt'
@@ -37,6 +37,7 @@ function EmergencyActive() {
   const emergencyEndedRef = useRef(false)
   const locationSharedRef = useRef(false)
   const [googleMapsUrl, setGoogleMapsUrl] = useState<string | null>(null)
+  const [showDiagnostics, setShowDiagnostics] = useState(false)
 
   // Helper function to refresh Eruda console after important logs
   const refreshErudaConsole = useCallback(() => {
@@ -132,13 +133,7 @@ function EmergencyActive() {
         }
         
         // Update map center if needed
-        if (updated.length > 1) {
-          const avgLat = updated.reduce((sum, loc) => sum + parseFloat(loc.latitude.toString()), 0) / updated.length
-          const avgLng = updated.reduce((sum, loc) => sum + parseFloat(loc.longitude.toString()), 0) / updated.length
-          setMapCenter({ lat: avgLat, lng: avgLng })
-        } else {
-          setMapCenter({ lat: lat, lng: lng })
-        }
+        // Map removed - no need to set center
         
         return updated
       })
@@ -172,25 +167,7 @@ function EmergencyActive() {
     }
   }, [id])
 
-  // Monitor map loading timeout - longer for Safari
-  useEffect(() => {
-    if (!mapLoaded && id) {
-      // Detect Safari for longer timeout
-      const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || /iphone|ipad|ipod/i.test(navigator.userAgent)
-      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
-      const timeoutDuration = isIOS ? 20000 : isSafariBrowser ? 15000 : 10000 // 20s for iOS, 15s for Safari, 10s for others
-      
-      const timeout = setTimeout(() => {
-        if (!mapLoaded && mapRef.current) {
-          console.warn('⚠️ Map did not load within expected time. Map ref exists but mapLoaded is still false.' + (isSafariBrowser ? ' (Safari)' : ''))
-        } else if (!mapLoaded && !mapRef.current) {
-          console.warn('⚠️ Map did not load within expected time. Map ref is null.' + (isSafariBrowser ? ' (Safari)' : ''))
-        }
-      }, timeoutDuration)
-      
-      return () => clearTimeout(timeout)
-    }
-  }, [mapLoaded, id])
+  // Map removed - no map loading timeout needed
 
   // Share location once when page loads (for both sender and responder)
   useEffect(() => {
@@ -440,12 +417,8 @@ function EmergencyActive() {
           setMapCenter({ lat: avgLat, lng: avgLng })
           console.log('✅ [DEBUG] Setting map center (multiple locations):', { lat: avgLat, lng: avgLng })
         } else {
-          // Single location - center on it using unified coordinate parsing
-          const loc = uniqueLocations[0]
-          const centerLat = parseCoordinate(loc.latitude)
-          const centerLng = parseCoordinate(loc.longitude)
-          setMapCenter({ lat: centerLat, lng: centerLng })
-          console.log('✅ [DEBUG] Setting map center (single location):', { lat: centerLat, lng: centerLng })
+          // Map removed - no need to set center
+          console.log('✅ [DEBUG] Single location found:', { loc: uniqueLocations[0] })
         }
         
         console.log('✅ [DEBUG] Locations set on map successfully:', {
@@ -520,79 +493,7 @@ function EmergencyActive() {
     }
   }
 
-  /**
-   * Handle map load event
-   * Sets map reference and marks map as loaded after initialization
-   */
-  // Map removed - onMapLoad no longer needed
-  const onMapLoad_UNUSED = useCallback((map: any) => {
-    try {
-      if (!map) {
-        return
-      }
-      
-      // Ensure Google Maps API is available
-      if (typeof window === 'undefined' || !(window as any).google?.maps) {
-        // Retry after a short delay
-        setTimeout(() => {
-          try {
-            if ((window as any).google?.maps && map && map.getDiv && map.getDiv()) {
-              mapRef.current = map
-              setTimeout(() => {
-                try {
-                  if (mapRef.current === map && mapRef.current && mapRef.current.getDiv && mapRef.current.getDiv()) {
-                    setMapLoaded(true)
-                  } else {
-                    console.warn('⚠️ Map instance changed or invalid during retry initialization')
-                  }
-                } catch (err) {
-                  console.error('❌ Error checking map during retry:', err)
-                }
-              }, 500)
-            }
-          } catch (err) {
-            console.error('❌ Error in map retry initialization:', err)
-          }
-        }, 200)
-        return
-      }
-      
-      // Verify map has required methods before using it
-      if (!map.getDiv || typeof map.getDiv !== 'function') {
-        console.warn('⚠️ Map instance does not have getDiv method')
-        return
-      }
-      
-      // Set map reference and mark as loaded after a delay to ensure initialization
-      mapRef.current = map
-      
-      // Verify map instance is valid
-      try {
-        const div = map.getDiv()
-        if (!div) {
-          console.warn('⚠️ Map instance does not have a valid div element')
-          return
-        }
-      } catch (err) {
-        console.error('❌ Error checking map div:', err)
-        return
-      }
-      
-      setTimeout(() => {
-        try {
-          if (mapRef.current === map && mapRef.current && mapRef.current.getDiv && mapRef.current.getDiv()) {
-            setMapLoaded(true)
-          } else {
-            console.warn('⚠️ Map instance changed or invalid during initialization')
-          }
-        } catch (err) {
-          console.error('❌ Error in map initialization timeout:', err)
-        }
-      }, 500)
-    } catch (err) {
-      console.error('❌ Error in onMapLoad:', err)
-    }
-  }, [])
+  // Map removed - onMapLoad function removed
   
 
   /**
@@ -826,7 +727,6 @@ function EmergencyActive() {
   useEffect(() => {
     if (isSender || !emergency?.user_id || !locations.length) {
       setGoogleMapsUrl(null)
-      setGoogleMapsUrlLoading(false)
       return
     }
 
@@ -869,21 +769,6 @@ function EmergencyActive() {
           <p style={{ margin: 0, fontSize: '0.85rem', color: '#666' }}>
             The sender needs to share their location. If they're on HTTP, they should use the "Share Location" button.
           </p>
-        </div>
-      )
-    }
-
-    // If URL is loading, show loading state
-    if (googleMapsUrlLoading) {
-      return (
-        <div style={{ 
-          padding: '1rem', 
-          backgroundColor: '#C5E1F5', /* Medium baby blue - replaces light blue */
-          borderRadius: '8px', 
-          margin: '1rem 0',
-          textAlign: 'center'
-        }}>
-          <p style={{ margin: 0 }}>📍 Generating directions link...</p>
         </div>
       )
     }
@@ -1090,7 +975,7 @@ function EmergencyActive() {
           </div>
         </div>
       )
-  }, [isSender, emergency?.user_id, locations, googleMapsUrl, googleMapsUrlLoading, showDiagnostics, generateDiagnostics])
+  }, [isSender, emergency?.user_id, locations, googleMapsUrl, showDiagnostics, generateDiagnostics])
 
   if (loading) {
     return (
