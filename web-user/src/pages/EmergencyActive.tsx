@@ -643,9 +643,9 @@ function EmergencyActive() {
     const parsedLat = parseFloat(senderLoc.latitude.toString())
     const parsedLng = parseFloat(senderLoc.longitude.toString())
     
-    // Step 3: Formatted coordinates (what goes in URL)
-    const formattedLat = formatCoordinate(parsedLat)
-    const formattedLng = formatCoordinate(parsedLng)
+    // Step 3: Formatted coordinates (what goes in URL) - use directly as strings (stored as TEXT)
+    const formattedLat = typeof senderLoc.latitude === 'string' ? senderLoc.latitude : senderLoc.latitude.toString()
+    const formattedLng = typeof senderLoc.longitude === 'string' ? senderLoc.longitude : senderLoc.longitude.toString()
     
     // Step 4: Map marker coordinates (from locations array)
     const mapMarkerLoc = locations.find(loc => String(loc.user_id) === String(emergency?.user_id))
@@ -710,8 +710,10 @@ function EmergencyActive() {
       const originLat = parseFloat(responderLoc.latitude.toString())
       const originLng = parseFloat(responderLoc.longitude.toString())
       if (!isNaN(originLat) && !isNaN(originLng)) {
-        // Use simple coordinate format for diagnostics (async place_id lookup happens elsewhere)
-        const originCoords = `${formatCoordinate(originLat)},${formatCoordinate(originLng)}`
+        // Use simple coordinate format for diagnostics - use directly as strings (stored as TEXT)
+        const originLatStr = typeof responderLoc.latitude === 'string' ? responderLoc.latitude : responderLoc.latitude.toString()
+        const originLngStr = typeof responderLoc.longitude === 'string' ? responderLoc.longitude : responderLoc.longitude.toString()
+        const originCoords = `${originLatStr},${originLngStr}`
         currentUrl = `https://www.google.com/maps/dir/?api=1&origin=${originCoords}&destination=${formattedLat},${formattedLng}&travelmode=driving`
       } else {
         currentUrl = `https://www.google.com/maps/dir/?api=1&destination=${formattedLat},${formattedLng}&travelmode=driving`
@@ -1088,7 +1090,7 @@ function EmergencyActive() {
           </div>
         </div>
       )
-  }, [isSender, emergency?.user_id, locations, googleMapsUrl, googleMapsUrlLoading, showDiagnostics, formatCoordinate, generateDiagnostics])
+  }, [isSender, emergency?.user_id, locations, googleMapsUrl, googleMapsUrlLoading, showDiagnostics, generateDiagnostics])
 
   if (loading) {
     return (
