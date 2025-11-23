@@ -795,20 +795,21 @@ function EmergencyActive() {
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
       
       if (isMobile) {
-        // PRIMARY APPROACH: Use 'q' parameter format - prevents geocoding, uses exact coordinates
-        // This format opens the location at exact coordinates, user can tap "Directions" button
-        // Format: https://www.google.com/maps?q=lat,lng
-        const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
+        // NEW APPROACH: Use '@lat,lng,zoom' format in directions URL
+        // This format explicitly marks coordinates and opens directly in navigation mode
+        // The zoom level (20) ensures maximum precision, prevents geocoding/snapping
+        // Format: https://www.google.com/maps/dir/?api=1&destination=@lat,lng,20z&travelmode=driving
+        const url = `https://www.google.com/maps/dir/?api=1&destination=@${destLatStr},${destLngStr},20z&travelmode=driving`
         
-        console.log('🔗 Step 9: Final Google Maps URL (Mobile - q parameter):', {
+        console.log('🔗 Step 9: Final Google Maps URL (Mobile - @ format):', {
           url,
           destinationCoords: `${destLatStr},${destLngStr}`,
           formattedLat: destLatNum,
           formattedLng: destLngNum,
           userAgent: navigator.userAgent,
           isMobile: true,
-          format: 'q parameter (prevents geocoding, exact coordinates)',
-          note: 'User can tap "Directions" button in Google Maps app for navigation'
+          format: '@lat,lng,zoom format (explicit coordinates, opens in navigation)',
+          note: 'Opens directly in navigation mode with exact coordinates, prevents snapping to roads'
         })
         refreshErudaConsole()
         return url
