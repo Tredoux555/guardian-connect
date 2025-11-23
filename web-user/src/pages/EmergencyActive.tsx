@@ -751,11 +751,13 @@ function EmergencyActive() {
   /**
    * Convert coordinates to Google Plus Code (Open Location Code)
    * Plus Codes are designed to represent exact GPS coordinates without geocoding
+   * Using 11 characters for maximum precision (~3m accuracy instead of ~14m with default 8 chars)
    */
   const coordinatesToPlusCode = (lat: number, lng: number): string => {
     try {
       const olc = new OpenLocationCode()
-      return olc.encode(lat, lng)
+      // Use 11 characters for maximum precision (~3m x 3m area instead of ~14m x 14m)
+      return olc.encode(lat, lng, 11)
     } catch (error) {
       console.error('Error converting coordinates to Plus Code:', error)
       // Fallback to empty string - will use coordinates instead
