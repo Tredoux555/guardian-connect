@@ -75,7 +75,11 @@ class LogCollector {
     const message = args[0]?.toString() || ''
     
     // IMPORTANT: Skip log collector's own messages to prevent recursion
-    if (message.includes('📝 [LOG COLLECTOR]') || message.includes('[LOG COLLECTOR]')) {
+    // Check if message starts with or contains log collector prefix
+    if (message.startsWith('📝 [LOG COLLECTOR]') || 
+        message.startsWith('[LOG COLLECTOR]') ||
+        message.includes('📝 [LOG COLLECTOR]') || 
+        message.includes('[LOG COLLECTOR]')) {
       return // Don't capture our own log messages
     }
     
