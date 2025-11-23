@@ -686,10 +686,17 @@ function EmergencyActive() {
       
       if (isMobile) {
         // On mobile: Use destination only - Google Maps uses device GPS
-        // Use coordinates directly without encoding comma - Google Maps parses coordinates better this way
-        const destCoords = `${formattedDestLat},${formattedDestLng}`
-        // Remove dir_action=navigate to prevent geocoding - use raw coordinates
-        return `https://www.google.com/maps/dir/?api=1&destination=${destCoords}&travelmode=driving`
+        // Use raw coordinate format - Google Maps should parse lat,lng directly
+        const url = `https://www.google.com/maps/dir/?api=1&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
+        console.log('🔗 Step 9: Final Google Maps URL (Mobile):', {
+          url,
+          destinationCoords: `${formattedDestLat},${formattedDestLng}`,
+          formattedLat: formattedDestLat,
+          formattedLng: formattedDestLng,
+          userAgent: navigator.userAgent,
+          isMobile: true
+        })
+        return url
       } else {
         // On desktop: Use exact origin and destination
         const formattedOriginLat = formatCoordinate(originLat)
@@ -708,11 +715,19 @@ function EmergencyActive() {
           return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
         }
         
-        const originCoords = `${formattedOriginLat},${formattedOriginLng}`
-        const destCoords = `${formattedDestLat},${formattedDestLng}`
-        // Use coordinates directly without encoding - Google Maps parses coordinates better this way
-        // Remove dir_action=navigate to prevent geocoding
-        return `https://www.google.com/maps/dir/?api=1&origin=${originCoords}&destination=${destCoords}&travelmode=driving`
+        // Use coordinates directly - Google Maps will parse them as GPS coordinates
+        // Format: origin=lat,lng&destination=lat,lng (no encoding needed for comma)
+        const url = `https://www.google.com/maps/dir/?api=1&origin=${formattedOriginLat},${formattedOriginLng}&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
+        console.log('🔗 Step 9: Final Google Maps URL (Desktop):', {
+          url,
+          origin: `${formattedOriginLat},${formattedOriginLng}`,
+          destination: `${formattedDestLat},${formattedDestLng}`,
+          formattedOriginLat,
+          formattedOriginLng,
+          formattedDestLat,
+          formattedDestLng
+        })
+        return url
       }
       
     } catch (error) {
@@ -1039,9 +1054,8 @@ function EmergencyActive() {
             if (isMobile) {
               // On mobile: Send only destination - Google Maps automatically uses device GPS
               // CRITICAL: Use already-formatted strings to preserve precision
-              const destCoords = `${formattedDestLat},${formattedDestLng}`
-              // Use coordinates directly without encoding - prevents geocoding
-              url = `https://www.google.com/maps/dir/?api=1&destination=${destCoords}&travelmode=driving`
+              // Use direct coordinate format to prevent geocoding
+              url = `https://www.google.com/maps/dir/?api=1&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
             } else {
               // On desktop: Fallback to destination only
               const destCoords = `${formattedDestLat},${formattedDestLng}`
@@ -1053,9 +1067,8 @@ function EmergencyActive() {
           if (isMobile) {
             // On mobile: Send only destination - Google Maps automatically uses device GPS for origin
             // CRITICAL: Use already-formatted strings to preserve precision
-            const destCoords = `${formattedDestLat},${formattedDestLng}`
-            // Use coordinates directly without encoding - prevents geocoding
-            url = `https://www.google.com/maps/dir/?api=1&destination=${destCoords}&travelmode=driving`
+            // Use direct coordinate format to prevent geocoding
+            url = `https://www.google.com/maps/dir/?api=1&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
           } else {
             // On desktop: Use destination only
             const destCoords = `${formattedDestLat},${formattedDestLng}`

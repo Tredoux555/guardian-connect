@@ -72,9 +72,57 @@ export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
           setIsLoading(false)
           cleanup()
         }
-      }, 300) // Increased from 200ms to 300ms
+      }, 300)
       
       return cleanup
+    }
+
+    // If script is not loaded and not loading, try manual injection as fallback (especially for mobile)
+    if (!isScriptLoaded() && !scriptLoadingRef.current && GOOGLE_MAPS_API_KEY) {
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+      if (isMobile) {
+        // On mobile, try manual script injection as fallback
+        console.log('📱 Mobile detected - attempting manual Google Maps script injection')
+        setIsLoading(true)
+        scriptLoadingRef.current = true
+        
+        // Check if script already exists
+        const existingScripts = document.querySelectorAll('script[src*="maps.googleapis.com"]')
+        if (existingScripts.length === 0) {
+          // Inject script manually
+          const script = document.createElement('script')
+          script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
+          script.async = true
+          script.defer = true
+          script.onload = () => {
+            console.log('✅ Google Maps script loaded manually (mobile)')
+            // Wait for initialization
+            const checkReady = (attempt = 0) => {
+              if (isGoogleMapsReady()) {
+                scriptLoadingRef.current = false
+                setIsReady(true)
+                setIsLoading(false)
+                cleanup()
+              } else if (attempt < 50) {
+                retryTimeoutRef.current = setTimeout(() => checkReady(attempt + 1), 300)
+              } else {
+                scriptLoadingRef.current = false
+                setIsLoading(false)
+                console.warn('⚠️ Manual script injection: Google Maps not ready after loading')
+              }
+            }
+            retryTimeoutRef.current = setTimeout(() => checkReady(), 1000)
+          }
+          script.onerror = () => {
+            scriptLoadingRef.current = false
+            setIsLoading(false)
+            console.error('❌ Failed to load Google Maps script manually')
+            // Fallback to LoadScript
+          }
+          document.head.appendChild(script)
+          return cleanup
+        }
+      }
     }
 
     // Check periodically if maps loaded (in case script loads asynchronously)
@@ -85,7 +133,7 @@ export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
         setIsLoading(false)
         cleanup()
       }
-    }, 300) // Increased from 100ms to 300ms
+    }, 300)
     
     return cleanup
   }, [isReady])
