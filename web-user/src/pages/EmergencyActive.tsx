@@ -787,28 +787,23 @@ function EmergencyActive() {
         throw new Error('Invalid destination coordinates')
       }
       
-      // Convert destination to Plus Code
-      const destPlusCode = coordinatesToPlusCode(destLatNum, destLngNum)
-      
       // Detect mobile device
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
       
       if (isMobile) {
         // On mobile: Use destination only - Google Maps uses device GPS
-        // Use Plus Code in search format - Google Maps recognizes Plus Codes as exact locations
-        const url = destPlusCode 
-          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destPlusCode)}`
-          : `https://www.google.com/maps/dir/?api=1&destination=${destLatNum},${destLngNum}&travelmode=driving`
+        // Use raw coordinates directly in directions URL - this is the most accurate format
+        // The destination=lat,lng format should use exact coordinates without geocoding
+        const url = `https://www.google.com/maps/dir/?api=1&destination=${destLatNum},${destLngNum}&travelmode=driving`
         
         console.log('🔗 Step 9: Final Google Maps URL (Mobile):', {
           url,
-          destinationPlusCode: destPlusCode,
           destinationCoords: `${destLatNum},${destLngNum}`,
           formattedLat: destLatNum,
           formattedLng: destLngNum,
           userAgent: navigator.userAgent,
           isMobile: true,
-          note: destPlusCode ? 'Using Plus Code for exact location (no geocoding)' : 'Fallback to coordinates'
+          note: 'Using raw coordinates in directions URL for maximum accuracy'
         })
         return url
       } else {
@@ -818,38 +813,25 @@ function EmergencyActive() {
         
         // Validate origin
         if (isNaN(originLatNum) || isNaN(originLngNum) || originLatNum === 0 || originLngNum === 0) {
-          // No valid origin - use search format with Plus Code
-          const url = destPlusCode
-            ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destPlusCode)}`
-            : `https://www.google.com/maps/search/?api=1&query=${destLatNum},${destLngNum}`
+          // No valid origin - use search format with raw coordinates
+          const url = `https://www.google.com/maps/search/?api=1&query=${destLatNum},${destLngNum}`
           return url
         }
         
         // Check if origin and destination are identical
         if (Math.abs(originLatNum - destLatNum) < 0.0001 && Math.abs(originLngNum - destLngNum) < 0.0001) {
-          const url = destPlusCode
-            ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destPlusCode)}`
-            : `https://www.google.com/maps/search/?api=1&query=${destLatNum},${destLngNum}`
+          const url = `https://www.google.com/maps/search/?api=1&query=${destLatNum},${destLngNum}`
           return url
         }
         
-        // Convert origin to Plus Code
-        const originPlusCode = coordinatesToPlusCode(originLatNum, originLngNum)
-        
-        // Use Plus Codes in directions URL
-        // Note: Google Maps directions API may not support Plus Codes directly in origin/destination
-        // So we'll use search format with Plus Code, or fallback to coordinates
-        const url = destPlusCode
-          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destPlusCode)}`
-          : `https://www.google.com/maps/dir/?api=1&origin=${originLatNum},${originLngNum}&destination=${destLatNum},${destLngNum}&travelmode=driving`
+        // Use raw coordinates directly in directions URL - most accurate format
+        const url = `https://www.google.com/maps/dir/?api=1&origin=${originLatNum},${originLngNum}&destination=${destLatNum},${destLngNum}&travelmode=driving`
         
         console.log('🔗 Step 9: Final Google Maps URL (Desktop):', {
           url,
-          originPlusCode,
-          destinationPlusCode: destPlusCode,
           origin: `${originLatNum},${originLngNum}`,
           destination: `${destLatNum},${destLngNum}`,
-          note: destPlusCode ? 'Using Plus Code for exact location (no geocoding)' : 'Fallback to coordinates'
+          note: 'Using raw coordinates in directions URL for maximum accuracy'
         })
         return url
       }
