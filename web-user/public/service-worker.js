@@ -175,13 +175,15 @@ async function playEmergencySound() {
       console.log('🔊 Emergency tone started in service worker');
     };
     
-    // CRITICAL: Resume AudioContext if suspended
+    // CRITICAL: Resume AudioContext if suspended (especially important on mobile)
+    // Service worker AudioContext often starts suspended on mobile devices
     if (emergencySoundContext.state === 'suspended') {
       emergencySoundContext.resume().then(() => {
         console.log('✅ AudioContext resumed in service worker');
         startTone();
       }).catch((err) => {
         console.error('Failed to resume AudioContext in service worker:', err);
+        // Try to start anyway - sometimes it works even if resume fails
         startTone();
       });
     } else {
@@ -189,6 +191,7 @@ async function playEmergencySound() {
     }
     
     // Also try to play sound file in continuous loop if available
+    // This provides better mobile compatibility than generated tones
     try {
       const response = await fetch(EMERGENCY_SOUND_URL);
       if (response.ok) {
@@ -202,9 +205,13 @@ async function playEmergencySound() {
         emergencySoundSource.connect(gain);
         gain.connect(emergencySoundContext.destination);
         emergencySoundSource.start();
+        console.log('✅ Sound file playing in service worker (mobile-friendly)');
+      } else {
+        console.log('⚠️ Sound file not found, using generated continuous tone');
       }
     } catch (err) {
-      console.log('Sound file not available, using generated continuous tone');
+      console.log('⚠️ Sound file not available, using generated continuous tone:', err);
+      // Generated tone should still work
     }
   } catch (error) {
     console.error('Error playing emergency sound:', error);

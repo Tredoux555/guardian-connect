@@ -182,6 +182,7 @@ export const playEmergencySound = (): void => {
     };
     
     // CRITICAL: Resume AudioContext if suspended (browsers require user interaction)
+    // On mobile, AudioContext often starts suspended - we need to resume it
     if (emergencySoundContext.state === 'suspended') {
       console.log('⏸️ AudioContext is suspended, attempting to resume...');
       emergencySoundContext.resume().then(() => {
@@ -198,15 +199,26 @@ export const playEmergencySound = (): void => {
     }
     
     // Also try to play a sound file in a continuous loop if available
+    // This works better on mobile than generated tones in some cases
     try {
       emergencySoundAudio = new Audio('/emergency-alert.mp3');
       emergencySoundAudio.volume = 1.0; // Maximum volume
       emergencySoundAudio.loop = true; // Loop continuously
-      emergencySoundAudio.play().then(() => {
-        console.log('✅ Sound file playing');
-      }).catch((err) => {
-        console.log('⚠️ Sound file not available, using generated continuous tone:', err);
-      });
+      // Set preload for better mobile compatibility
+      emergencySoundAudio.preload = 'auto';
+      
+      // For mobile, we need to handle play() promise carefully
+      const playPromise = emergencySoundAudio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log('✅ Sound file playing (mobile-friendly)');
+          })
+          .catch((err) => {
+            console.log('⚠️ Sound file play failed (will use generated tone):', err);
+            // Sound file failed, but generated tone should still work
+          });
+      }
     } catch (err) {
       console.log('⚠️ Could not create Audio element:', err);
       // Sound file not available, generated tone is playing

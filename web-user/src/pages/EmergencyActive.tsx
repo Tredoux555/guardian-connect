@@ -795,21 +795,21 @@ function EmergencyActive() {
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
       
       if (isMobile) {
-        // Use search URL format to show exact location with dropped pin
-        // This prevents snapping - shows exact coordinates, user can tap Directions if needed
-        // Format: https://www.google.com/maps?q=lat,lng
-        // This drops a pin at the exact coordinates without snapping to roads
-        const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
+        // Use @lat,lng,zoom format in base URL path - this prevents geocoding
+        // The @ format in the base URL (not as parameter) shows exact coordinates without geocoding
+        // Format: https://www.google.com/maps/@lat,lng,zoom
+        // Zoom level 20 = maximum precision (shows exact location)
+        const url = `https://www.google.com/maps/@${destLatStr},${destLngStr},20z`
         
-        console.log('🔗 Step 9: Final Google Maps URL (Mobile - exact location):', {
+        console.log('🔗 Step 9: Final Google Maps URL (Mobile - @ format in base URL):', {
           url,
           destinationCoords: `${destLatStr},${destLngStr}`,
           formattedLat: destLatNum,
           formattedLng: destLngNum,
           userAgent: navigator.userAgent,
           isMobile: true,
-          format: 'search URL (shows exact location with dropped pin)',
-          note: 'Shows exact coordinates with dropped pin. User can tap Directions button for navigation if needed.'
+          format: '@lat,lng,zoom in base URL (prevents geocoding, shows exact location)',
+          note: 'Uses @ format in base URL path to show exact coordinates without geocoding. User can tap Directions for navigation.'
         })
         refreshErudaConsole()
         return url
