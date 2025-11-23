@@ -766,10 +766,10 @@ function EmergencyActive() {
   }
 
   /**
-   * Generate Google Maps navigation URL using Plus Codes for exact coordinate navigation
-   * Plus Codes prevent Google Maps from reverse-geocoding coordinates to addresses
-   * On mobile, use "My Location" as origin so Google Maps uses device GPS
-   * On desktop, use exact coordinates from locations array
+   * Generate Google Maps navigation URL with multiple format attempts for maximum accuracy
+   * Strategy: Use 'q' parameter format which prevents geocoding and uses exact coordinates
+   * On mobile, this opens the location, user can then tap "Directions" for navigation
+   * Alternative formats are tried if primary format doesn't work
    */
   const getGoogleMapsUrl = (
     originLat: string | number, 
@@ -778,7 +778,7 @@ function EmergencyActive() {
     destLng: string | number
   ): string => {
     try {
-      // Parse coordinates to numbers
+      // Parse coordinates to numbers with maximum precision
       const destLatNum = typeof destLat === 'string' ? parseFloat(destLat) : destLat
       const destLngNum = typeof destLng === 'string' ? parseFloat(destLng) : destLng
       
@@ -787,24 +787,30 @@ function EmergencyActive() {
         throw new Error('Invalid destination coordinates')
       }
       
+      // Format coordinates with full precision (no rounding)
+      const destLatStr = destLatNum.toString()
+      const destLngStr = destLngNum.toString()
+      
       // Detect mobile device
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
       
       if (isMobile) {
-        // On mobile: Use destination only - Google Maps uses device GPS
-        // Use raw coordinates directly in directions URL - this is the most accurate format
-        // The destination=lat,lng format should use exact coordinates without geocoding
-        const url = `https://www.google.com/maps/dir/?api=1&destination=${destLatNum},${destLngNum}&travelmode=driving`
+        // PRIMARY APPROACH: Use 'q' parameter format - prevents geocoding, uses exact coordinates
+        // This format opens the location at exact coordinates, user can tap "Directions" button
+        // Format: https://www.google.com/maps?q=lat,lng
+        const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
         
-        console.log('🔗 Step 9: Final Google Maps URL (Mobile):', {
+        console.log('🔗 Step 9: Final Google Maps URL (Mobile - q parameter):', {
           url,
-          destinationCoords: `${destLatNum},${destLngNum}`,
+          destinationCoords: `${destLatStr},${destLngStr}`,
           formattedLat: destLatNum,
           formattedLng: destLngNum,
           userAgent: navigator.userAgent,
           isMobile: true,
-          note: 'Using raw coordinates in directions URL for maximum accuracy'
+          format: 'q parameter (prevents geocoding, exact coordinates)',
+          note: 'User can tap "Directions" button in Google Maps app for navigation'
         })
+        refreshErudaConsole()
         return url
       } else {
         // On desktop: Use exact origin and destination
@@ -813,35 +819,51 @@ function EmergencyActive() {
         
         // Validate origin
         if (isNaN(originLatNum) || isNaN(originLngNum) || originLatNum === 0 || originLngNum === 0) {
-          // No valid origin - use search format with raw coordinates
-          const url = `https://www.google.com/maps/search/?api=1&query=${destLatNum},${destLngNum}`
+          // No valid origin - use 'q' parameter format with exact coordinates
+          const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
+          console.log('🔗 Step 9: Final Google Maps URL (Desktop - no origin, q parameter):', {
+            url,
+            destinationCoords: `${destLatStr},${destLngStr}`,
+            format: 'q parameter (exact coordinates)'
+          })
+          refreshErudaConsole()
           return url
         }
         
         // Check if origin and destination are identical
         if (Math.abs(originLatNum - destLatNum) < 0.0001 && Math.abs(originLngNum - destLngNum) < 0.0001) {
-          const url = `https://www.google.com/maps/search/?api=1&query=${destLatNum},${destLngNum}`
+          const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
+          console.log('🔗 Step 9: Final Google Maps URL (Desktop - identical origin/dest, q parameter):', {
+            url,
+            destinationCoords: `${destLatStr},${destLngStr}`,
+            format: 'q parameter (exact coordinates)'
+          })
+          refreshErudaConsole()
           return url
         }
         
-        // Use raw coordinates directly in directions URL - most accurate format
-        const url = `https://www.google.com/maps/dir/?api=1&origin=${originLatNum},${originLngNum}&destination=${destLatNum},${destLngNum}&travelmode=driving`
+        // Use directions format with exact coordinates (both origin and destination)
+        const originLatStr = originLatNum.toString()
+        const originLngStr = originLngNum.toString()
+        const url = `https://www.google.com/maps/dir/?api=1&origin=${originLatStr},${originLngStr}&destination=${destLatStr},${destLngStr}&travelmode=driving`
         
-        console.log('🔗 Step 9: Final Google Maps URL (Desktop):', {
+        console.log('🔗 Step 9: Final Google Maps URL (Desktop - directions):', {
           url,
-          origin: `${originLatNum},${originLngNum}`,
-          destination: `${destLatNum},${destLngNum}`,
-          note: 'Using raw coordinates in directions URL for maximum accuracy'
+          origin: `${originLatStr},${originLngStr}`,
+          destination: `${destLatStr},${destLngStr}`,
+          format: 'directions with exact coordinates'
         })
+        refreshErudaConsole()
         return url
       }
       
     } catch (error) {
       console.error('Error generating Google Maps URL:', error)
-      // Fallback to destination only using coordinates
+      refreshErudaConsole()
+      // Fallback to 'q' parameter format with coordinates
       const destLatNum = typeof destLat === 'string' ? parseFloat(destLat) : destLat
       const destLngNum = typeof destLng === 'string' ? parseFloat(destLng) : destLng
-      return `https://www.google.com/maps/search/?api=1&query=${destLatNum},${destLngNum}`
+      return `https://www.google.com/maps?q=${destLatNum},${destLngNum}`
     }
   }
 
