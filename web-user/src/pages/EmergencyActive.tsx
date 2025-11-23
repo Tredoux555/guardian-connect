@@ -1220,6 +1220,40 @@ function EmergencyActive() {
     generateUrl()
   }, [isSender, emergency?.user_id, locations, currentUserId])
 
+  // Helper function to copy coordinates to clipboard
+  const copyCoordinates = (lat: string | number, lng: string | number) => {
+    const coords = `${lat},${lng}`
+    navigator.clipboard.writeText(coords).then(() => {
+      alert(`Coordinates copied to clipboard: ${coords}`)
+    }).catch(() => {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea')
+      textArea.value = coords
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+      alert(`Coordinates copied to clipboard: ${coords}`)
+    })
+  }
+
+  // Generate navigation URLs for different map apps
+  const getNavigationUrls = (lat: string | number, lng: string | number) => {
+    const latStr = typeof lat === 'string' ? lat : lat.toString()
+    const lngStr = typeof lng === 'string' ? lng : lng.toString()
+    const coords = `${latStr},${lngStr}`
+    
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    const isAndroid = /Android/i.test(navigator.userAgent)
+    
+    return {
+      googleMaps: `https://www.google.com/maps?q=${coords}`,
+      appleMaps: isIOS ? `maps://?q=${coords}` : `https://maps.apple.com/?q=${coords}`,
+      waze: isAndroid ? `waze://?ll=${coords}&navigate=yes` : `https://waze.com/ul?ll=${coords}&navigate=yes`,
+      coordinates: coords
+    }
+  }
+
   // Google Maps button - MUST be before early return to follow Rules of Hooks
   const googleMapsButton = useMemo(() => {
     if (isSender || !emergency?.user_id) return null
@@ -1277,44 +1311,165 @@ function EmergencyActive() {
       )
     }
 
+    // Get exact coordinates (stored as string or number)
+    const lat = senderLoc.latitude
+    const lng = senderLoc.longitude
+    const latStr = typeof lat === 'string' ? lat : lat.toString()
+    const lngStr = typeof lng === 'string' ? lng : lng.toString()
+    
+    // Generate all navigation URLs
+    const navUrls = getNavigationUrls(latStr, lngStr)
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    const isAndroid = /Android/i.test(navigator.userAgent)
+
     // Generate comprehensive diagnostics
     const diagnostics = generateDiagnostics(senderLoc)
       
     return (
       <div>
-        <div className="maps-link-container" style={{ 
-          padding: '1rem', 
-          backgroundColor: '#C5E1F5', /* Medium baby blue - replaces grey */
+        {/* Exact Coordinates Display & Multi-Format Navigation */}
+        <div style={{ 
+          padding: '1.5rem', 
+          backgroundColor: '#E8F4F8',
           borderRadius: '8px', 
           margin: '1rem 0',
-          textAlign: 'center'
+          textAlign: 'center',
+          border: '2px solid #4285F4'
         }}>
-          <a
-            href={googleMapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => {
-              // Verify URL is valid before opening
-              if (!googleMapsUrl || !googleMapsUrl.startsWith('https://www.google.com/maps')) {
-                e.preventDefault()
-                alert('Invalid Google Maps URL. Please try again.')
-                return false
-              }
+          <h3 style={{ marginTop: 0, marginBottom: '1rem', color: '#1a73e8' }}>
+            📍 Exact Emergency Location
+          </h3>
+          
+          {/* Coordinates Display */}
+          <div style={{
+            padding: '1rem',
+            backgroundColor: '#fff',
+            borderRadius: '6px',
+            marginBottom: '1rem',
+            fontFamily: 'monospace',
+            fontSize: '1.2rem',
+            fontWeight: 'bold',
+            color: '#1a73e8',
+            border: '1px solid #4285F4'
+          }}>
+            <div style={{ marginBottom: '0.5rem' }}>
+              <strong>Latitude:</strong> {latStr}
+            </div>
+            <div>
+              <strong>Longitude:</strong> {lngStr}
+            </div>
+            <div style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#666' }}>
+              {latStr}, {lngStr}
+            </div>
+          </div>
+
+          {/* Copy Coordinates Button */}
+          <button
+            onClick={() => copyCoordinates(latStr, lngStr)}
+            style={{
+              padding: '0.75rem 1.5rem',
+              backgroundColor: '#34a853',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '1rem',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              marginBottom: '1rem',
+              marginRight: '0.5rem'
             }}
-              style={{ 
-                display: 'inline-block', 
-                padding: '1rem 2rem',
+          >
+            📋 Copy Coordinates
+          </button>
+
+          {/* Navigation Options */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '0.75rem',
+            marginTop: '1rem'
+          }}>
+            {/* Google Maps */}
+            <a
+              href={googleMapsUrl || navUrls.googleMaps}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                // Verify URL is valid before opening
+                const url = googleMapsUrl || navUrls.googleMaps
+                if (!url || !url.startsWith('https://www.google.com/maps')) {
+                  e.preventDefault()
+                  alert('Invalid Google Maps URL. Please try again.')
+                  return false
+                }
+              }}
+              style={{
+                display: 'block',
+                padding: '1rem',
                 backgroundColor: '#4285F4',
-                color: '#F5FAFF', /* Lightest baby blue - replaces white text */
+                color: 'white',
                 textDecoration: 'none',
-                borderRadius: '8px',
-                fontSize: '1.1rem',
-                fontWeight: 'bold'
+                borderRadius: '6px',
+                fontSize: '1rem',
+                fontWeight: 'bold',
+                textAlign: 'center'
               }}
             >
-              Open in Google Maps for Directions
+              🗺️ Google Maps
+            </a>
+
+            {/* Apple Maps (iOS) */}
+            {(isIOS || !isAndroid) && (
+              <a
+                href={navUrls.appleMaps}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'block',
+                  padding: '1rem',
+                  backgroundColor: '#007AFF',
+                  color: 'white',
+                  textDecoration: 'none',
+                  borderRadius: '6px',
+                  fontSize: '1rem',
+                  fontWeight: 'bold',
+                  textAlign: 'center'
+                }}
+              >
+                🍎 Apple Maps
+              </a>
+            )}
+
+            {/* Waze */}
+            <a
+              href={navUrls.waze}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'block',
+                padding: '1rem',
+                backgroundColor: '#33CCFF',
+                color: 'white',
+                textDecoration: 'none',
+                borderRadius: '6px',
+                fontSize: '1rem',
+                fontWeight: 'bold',
+                textAlign: 'center'
+              }}
+            >
+              🧭 Waze
             </a>
           </div>
+
+          <p style={{ 
+            marginTop: '1rem', 
+            fontSize: '0.85rem', 
+            color: '#666',
+            fontStyle: 'italic'
+          }}>
+            Choose your preferred navigation app. Coordinates are exact GPS location.
+          </p>
+        </div>
           
           {/* Diagnostic Panel */}
           <div style={{ 
