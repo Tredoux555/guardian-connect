@@ -56,12 +56,14 @@ CREATE TABLE IF NOT EXISTS emergency_participants (
 );
 
 -- Emergency locations table
+-- Using TEXT for latitude/longitude to preserve exact GPS precision (zero precision loss)
+-- GPS coordinates stored exactly as received from device - no rounding, no conversion errors
 CREATE TABLE IF NOT EXISTS emergency_locations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     emergency_id UUID NOT NULL REFERENCES emergencies(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    latitude DECIMAL(10, 8) NOT NULL,
-    longitude DECIMAL(11, 8) NOT NULL,
+    latitude TEXT NOT NULL,
+    longitude TEXT NOT NULL,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

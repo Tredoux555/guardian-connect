@@ -239,8 +239,13 @@ router.post(
         });
       }
 
-      // Add location
-      await Emergency.addLocation(emergencyId, userId, latitude, longitude);
+      // Convert to string immediately to preserve exact GPS precision (zero precision loss)
+      // Store exact coordinates as received from GPS device
+      const latStr = typeof latitude === 'string' ? latitude : latitude.toString()
+      const lngStr = typeof longitude === 'string' ? longitude : longitude.toString()
+
+      // Add location (stored as TEXT - exact GPS coordinates)
+      await Emergency.addLocation(emergencyId, userId, latStr, lngStr);
 
       // Get user's display name and email for socket event
       const userResult = await query(

@@ -1,10 +1,7 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { GoogleMap, Marker, InfoWindow } from '@react-google-maps/api'
-import { OpenLocationCode } from 'open-location-code'
 import api from '../services/api'
 import { getCurrentUserId } from '../utils/jwt'
-import { GoogleMapsLoader } from '../components/GoogleMapsLoader'
 import { 
   connectSocket, 
   joinEmergency, 
@@ -17,31 +14,12 @@ import {
 import { EmergencyChat } from '../components/EmergencyChat'
 import './EmergencyActive.css'
 
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
-
-// Declare google types for TypeScript
-declare global {
-  interface Window {
-    google?: {
-      maps: typeof google.maps
-    }
-  }
-}
-
-const mapContainerStyle = {
-  width: '100%',
-  height: '400px',
-}
-
-const defaultCenter = {
-  lat: 0,
-  lng: 0,
-}
+// Simplified: No Google Maps API needed - direct link only
 
 interface Location {
   user_id: string
-  latitude: number
-  longitude: number
+  latitude: string | number  // Now stored as TEXT in database - exact GPS coordinates
+  longitude: string | number  // Now stored as TEXT in database - exact GPS coordinates
   timestamp: string
   user_email?: string
   user_display_name?: string
@@ -55,16 +33,10 @@ function EmergencyActive() {
   const [locations, setLocations] = useState<Location[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null)
-  const [mapCenter, setMapCenter] = useState(defaultCenter)
   const [senderLocation, setSenderLocation] = useState<Location | null>(null)
-  const [mapLoaded, setMapLoaded] = useState(false)
-  const mapRef = useRef<google.maps.Map | null>(null)
-  const [showDiagnostics, setShowDiagnostics] = useState(false)
   const emergencyEndedRef = useRef(false)
   const locationSharedRef = useRef(false)
   const [googleMapsUrl, setGoogleMapsUrl] = useState<string | null>(null)
-  const [googleMapsUrlLoading, setGoogleMapsUrlLoading] = useState(false)
 
   // Helper function to refresh Eruda console after important logs
   const refreshErudaConsole = useCallback(() => {
@@ -552,7 +524,8 @@ function EmergencyActive() {
    * Handle map load event
    * Sets map reference and marks map as loaded after initialization
    */
-  const onMapLoad = useCallback((map: google.maps.Map) => {
+  // Map removed - onMapLoad no longer needed
+  const onMapLoad_UNUSED = useCallback((map: any) => {
     try {
       if (!map) {
         return
@@ -640,232 +613,21 @@ function EmergencyActive() {
     return Number(coord)
   }
 
-  /**
-   * Get marker icon based on location type
-   * Sender: red pin (default Google Maps marker)
-   * Receiver: blue dot (custom icon)
-   * Falls back to default marker if custom icon creation fails
-   */
-  const getMarkerIcon = (isSenderLocation: boolean): google.maps.Symbol | undefined => {
-    // Always validate Google Maps is available first
-    if (typeof window === 'undefined') return undefined
-    const google = (window as any).google
-    if (!google?.maps) return undefined
-    
-    // Sender location: use default red pin
-    if (isSenderLocation) {
-      return undefined
-    }
-    
-    // Receiver location: blue dot
-    try {
-      if (!google.maps.SymbolPath) {
-        // Fallback to default marker if SymbolPath not available
-        return undefined
-      }
-      
-      return {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 12, // Increased from 10 for better visibility
-        fillColor: '#4285F4', // Google blue
-        fillOpacity: 1,
-        strokeColor: '#FFFFFF',
-        strokeWeight: 3, // Increased from 2 for better contrast
-      }
-    } catch (error) {
-      // Fallback to default marker on error
-      console.error('Error creating marker icon:', error)
-      return undefined
-    }
-  }
+  // Map removed - these functions no longer needed:
+  // getMarkerIcon, calculateDistance, formatDistance, formatCoordinate, coordinatesToPlusCode
 
   /**
-   * Calculate distance between two coordinates using Haversine formula
-   * Returns distance in kilometers
+   * Generate Google Maps URL - SIMPLIFIED: Direct link with exact coordinates
+   * Coordinates are stored as TEXT in database - zero precision loss
+   * Use ?q=lat,lng format - drops pin at exact GPS coordinates
    */
-  const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
-    const R = 6371 // Earth's radius in kilometers
-    const dLat = (lat2 - lat1) * Math.PI / 180
-    const dLng = (lng2 - lng1) * Math.PI / 180
-    const a = 
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLng / 2) * Math.sin(dLng / 2)
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    return R * c
-  }
-
-  /**
-   * Format distance for display
-   * Returns formatted string in km or miles based on distance
-   */
-  const formatDistance = (distanceKm: number): string => {
-    if (distanceKm < 1) {
-      return `${Math.round(distanceKm * 1000)}m away`
-    } else if (distanceKm < 10) {
-      return `${distanceKm.toFixed(1)} km away`
-    } else {
-      return `${Math.round(distanceKm)} km away`
-    }
-  }
-
-  /**
-   * Format coordinate with precision matching database storage
-   * Database stores: DECIMAL(10,8) for latitude, DECIMAL(11,8) for longitude
-   * Using 8 decimal places ensures exact match between database, map markers, and Google Maps URLs
-   * According to Google Maps documentation, coordinates should be URL-encoded with comma as %2C
-   */
-  const formatCoordinate = (coord: string | number | null | undefined): string => {
-    if (coord === null || coord === undefined) {
-      return '0'
-    }
+  const getGoogleMapsUrl = (destLat: string | number, destLng: string | number): string => {
+    // Convert to string (coordinates are stored as TEXT - exact GPS precision)
+    const destLatStr = typeof destLat === 'string' ? destLat : destLat.toString()
+    const destLngStr = typeof destLng === 'string' ? destLng : destLng.toString()
     
-    let coordStr = typeof coord === 'number' ? coord.toString() : coord
-    
-    // Split into integer and decimal parts
-    const parts = coordStr.split('.')
-    let integer = parts[0] || '0'
-    let decimal = parts[1] || ''
-    
-    // Handle negative numbers
-    const isNegative = integer.startsWith('-')
-    if (isNegative) {
-      integer = integer.slice(1)
-    }
-    
-    // Pad decimal to exactly 8 places
-    while (decimal.length < 8) {
-      decimal += '0'
-    }
-    // Truncate if longer
-    decimal = decimal.slice(0, 8)
-    
-    let formatted = `${integer}.${decimal}`
-    if (isNegative) {
-      formatted = `-${formatted}`
-    }
-    
-    return formatted
-  }
-
-  /**
-   * Convert coordinates to Google Plus Code (Open Location Code)
-   * Plus Codes are designed to represent exact GPS coordinates without geocoding
-   * Using 11 characters for maximum precision (~3m accuracy instead of ~14m with default 8 chars)
-   */
-  const coordinatesToPlusCode = (lat: number, lng: number): string => {
-    try {
-      const olc = new OpenLocationCode()
-      // Use 11 characters for maximum precision (~3m x 3m area instead of ~14m x 14m)
-      return olc.encode(lat, lng, 11)
-    } catch (error) {
-      console.error('Error converting coordinates to Plus Code:', error)
-      // Fallback to empty string - will use coordinates instead
-      return ''
-    }
-  }
-
-  /**
-   * Generate Google Maps navigation URL with multiple format attempts for maximum accuracy
-   * Strategy: Use 'q' parameter format which prevents geocoding and uses exact coordinates
-   * On mobile, this opens the location, user can then tap "Directions" for navigation
-   * Alternative formats are tried if primary format doesn't work
-   */
-  const getGoogleMapsUrl = (
-    originLat: string | number, 
-    originLng: string | number, 
-    destLat: string | number, 
-    destLng: string | number
-  ): string => {
-    try {
-      // Parse coordinates to numbers with maximum precision
-      const destLatNum = typeof destLat === 'string' ? parseFloat(destLat) : destLat
-      const destLngNum = typeof destLng === 'string' ? parseFloat(destLng) : destLng
-      
-      // Validate destination coordinates
-      if (isNaN(destLatNum) || isNaN(destLngNum) || destLatNum === 0 || destLngNum === 0) {
-        throw new Error('Invalid destination coordinates')
-      }
-      
-      // Format coordinates with full precision (no rounding)
-      const destLatStr = destLatNum.toString()
-      const destLngStr = destLngNum.toString()
-      
-      // Detect mobile device
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-      
-      if (isMobile) {
-        // Use ?q=lat,lng format - this drops a pin at exact coordinates
-        // The q parameter with raw coordinates shows exact location with a pin drop
-        // Format: https://www.google.com/maps?q=lat,lng
-        // This is the most reliable format for showing exact GPS coordinates with a pin
-        const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
-        
-        console.log('🔗 Step 9: Final Google Maps URL (Mobile - q parameter with exact coordinates):', {
-          url,
-          destinationCoords: `${destLatStr},${destLngStr}`,
-          formattedLat: destLatNum,
-          formattedLng: destLngNum,
-          userAgent: navigator.userAgent,
-          isMobile: true,
-          format: 'q parameter with exact coordinates (drops pin at exact location)',
-          note: 'Uses q parameter with raw coordinates to drop a pin at exact location. User can tap Directions for navigation.'
-        })
-        refreshErudaConsole()
-        return url
-      } else {
-        // On desktop: Use exact origin and destination
-        const originLatNum = typeof originLat === 'string' ? parseFloat(originLat) : originLat
-        const originLngNum = typeof originLng === 'string' ? parseFloat(originLng) : originLng
-        
-        // Validate origin
-        if (isNaN(originLatNum) || isNaN(originLngNum) || originLatNum === 0 || originLngNum === 0) {
-          // No valid origin - use 'q' parameter format with exact coordinates
-          const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
-          console.log('🔗 Step 9: Final Google Maps URL (Desktop - no origin, q parameter):', {
-            url,
-            destinationCoords: `${destLatStr},${destLngStr}`,
-            format: 'q parameter (exact coordinates)'
-          })
-          refreshErudaConsole()
-          return url
-        }
-        
-        // Check if origin and destination are identical
-        if (Math.abs(originLatNum - destLatNum) < 0.0001 && Math.abs(originLngNum - destLngNum) < 0.0001) {
-          const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
-          console.log('🔗 Step 9: Final Google Maps URL (Desktop - identical origin/dest, q parameter):', {
-            url,
-            destinationCoords: `${destLatStr},${destLngStr}`,
-            format: 'q parameter (exact coordinates)'
-          })
-          refreshErudaConsole()
-          return url
-        }
-        
-        // Use directions format with exact coordinates (both origin and destination)
-        const originLatStr = originLatNum.toString()
-        const originLngStr = originLngNum.toString()
-        const url = `https://www.google.com/maps/dir/?api=1&origin=${originLatStr},${originLngStr}&destination=${destLatStr},${destLngStr}&travelmode=driving`
-        
-        console.log('🔗 Step 9: Final Google Maps URL (Desktop - directions):', {
-          url,
-          origin: `${originLatStr},${originLngStr}`,
-          destination: `${destLatStr},${destLngStr}`,
-          format: 'directions with exact coordinates'
-        })
-        refreshErudaConsole()
-        return url
-      }
-      
-    } catch (error) {
-      console.error('Error generating Google Maps URL:', error)
-      refreshErudaConsole()
-      // Fallback to 'q' parameter format with coordinates
-      const destLatNum = typeof destLat === 'string' ? parseFloat(destLat) : destLat
-      const destLngNum = typeof destLng === 'string' ? parseFloat(destLng) : destLng
-      return `https://www.google.com/maps?q=${destLatNum},${destLngNum}`
-    }
+    // Simple, bulletproof format: ?q=lat,lng drops pin at exact coordinates
+    return `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
   }
 
   /**
@@ -1066,159 +828,22 @@ function EmergencyActive() {
       return
     }
 
-    const generateUrl = () => {
-      setGoogleMapsUrlLoading(true)
-      try {
-        // Find sender location from locations array (same as what's shown on map)
-        // CRITICAL: Use the EXACT same location object and parsing method as map markers
-        // This ensures map marker and URL use identical coordinates
-        const senderLoc = locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(emergency.user_id))
-        
-        if (!senderLoc) {
-          setGoogleMapsUrl(null)
-          setGoogleMapsUrlLoading(false)
-          return
-        }
-
-        // Use formatCoordinate directly on raw database values to preserve precision
-        // This avoids floating-point conversion that can cause precision loss
-        const formattedDestLat = formatCoordinate(senderLoc.latitude)
-        const formattedDestLng = formatCoordinate(senderLoc.longitude)
-        
-        // Validate formatted coordinates (check they're not '0')
-        if (formattedDestLat === '0' || formattedDestLng === '0') {
-          console.error('Invalid destination coordinates:', { rawLat: senderLoc.latitude, rawLng: senderLoc.longitude, senderLoc })
-          setGoogleMapsUrl(null)
-          setGoogleMapsUrlLoading(false)
-          return
-        }
-        
-        // Parse for validation only (not used in URL)
-        const destLat = parseCoordinate(senderLoc.latitude)
-        const destLng = parseCoordinate(senderLoc.longitude)
-        
-        // Validate parsed coordinates for range checking
-        if (isNaN(destLat) || isNaN(destLng) || 
-            destLat < -90 || destLat > 90 || 
-            destLng < -180 || destLng > 180) {
-          console.error('Invalid destination coordinates (range check):', { destLat, destLng, rawLat: senderLoc.latitude, rawLng: senderLoc.longitude, senderLoc })
-          setGoogleMapsUrl(null)
-          setGoogleMapsUrlLoading(false)
-          return
-        }
-        
-        // Debug: Log coordinates to verify they match map markers
-        // Always log for debugging location issues
-        console.log('🔗 Google Maps URL Coordinates (Destination):', {
-          raw: { lat: senderLoc.latitude, lng: senderLoc.longitude },
-          parsed: { lat: destLat, lng: destLng },
-          formatted: { lat: formattedDestLat, lng: formattedDestLng },
-          urlFormat: `${formattedDestLat},${formattedDestLng}`,
-          databasePrecision: '8 decimal places (DECIMAL(10,8) and DECIMAL(11,8))'
-        })
-        
-        // Verify coordinates match map marker coordinates
-        const senderLocForComparison = locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(emergency.user_id))
-        if (senderLocForComparison) {
-          // Use unified parsing for comparison
-          const mapMarkerLat = parseCoordinate(senderLocForComparison.latitude)
-          const mapMarkerLng = parseCoordinate(senderLocForComparison.longitude)
-          
-          const coordsMatch = Math.abs(mapMarkerLat - destLat) < 0.0000001 && Math.abs(mapMarkerLng - destLng) < 0.0000001
-          if (!coordsMatch) {
-            console.warn('⚠️ COORDINATE MISMATCH:', {
-              mapMarker: { lat: mapMarkerLat, lng: mapMarkerLng },
-              urlDestination: { lat: destLat, lng: destLng },
-              difference: { lat: Math.abs(mapMarkerLat - destLat), lng: Math.abs(mapMarkerLng - destLng) },
-              formatted: {
-                mapMarker: `${formatCoordinate(mapMarkerLat)},${formatCoordinate(mapMarkerLng)}`,
-                urlDestination: `${formatCoordinate(destLat)},${formatCoordinate(destLng)}`
-              }
-            })
-          } else {
-            console.log('✅ Coordinates match between map marker and URL')
-          }
-        }
-        
-        // Detect mobile device
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-        
-        // Find responder location (current user) from locations array (optional)
-        const responderLoc = currentUserId 
-          ? locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(currentUserId))
-          : null
-        
-        let url: string
-        
-        if (responderLoc) {
-          // Format origin coordinates directly from database values (preserve precision)
-          const formattedOriginLat = formatCoordinate(responderLoc.latitude)
-          const formattedOriginLng = formatCoordinate(responderLoc.longitude)
-          
-          // Parse for validation only
-          const originLat = parseCoordinate(responderLoc.latitude)
-          const originLng = parseCoordinate(responderLoc.longitude)
-          
-          // Validate origin coordinates
-          if (formattedOriginLat !== '0' && formattedOriginLng !== '0' &&
-              !isNaN(originLat) && !isNaN(originLng) &&
-              originLat >= -90 && originLat <= 90 &&
-              originLng >= -180 && originLng <= 180) {
-            // Always use getGoogleMapsUrl with formatted strings - preserves exact precision
-            // On mobile, it uses "My Location", on desktop it uses exact coordinates
-            url = getGoogleMapsUrl(formattedOriginLat, formattedOriginLng, formattedDestLat, formattedDestLng)
-            
-            // Debug: Log full URL generation details
-            if (import.meta.env.DEV) {
-              console.log('🔗 Google Maps URL Generated:', {
-                origin: { lat: originLat, lng: originLng },
-                destination: { lat: destLat, lng: destLng },
-                url: url
-              })
-            }
-          } else {
-            // Invalid origin coordinates - use formatted destination strings
-            if (isMobile) {
-              // On mobile: Send only destination - Google Maps automatically uses device GPS
-              // CRITICAL: Use already-formatted strings to preserve precision
-              // Use direct coordinate format to prevent geocoding
-              url = `https://www.google.com/maps/dir/?api=1&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
-            } else {
-              // On desktop: Fallback to destination only
-              const destCoords = `${formattedDestLat},${formattedDestLng}`
-              url = `https://www.google.com/maps/search/?api=1&query=${destCoords}`
-            }
-          }
-        } else {
-          // Responder location not available yet - use formatted destination strings
-          if (isMobile) {
-            // On mobile: Send only destination - Google Maps automatically uses device GPS for origin
-            // CRITICAL: Use already-formatted strings to preserve precision
-            // Use direct coordinate format to prevent geocoding
-            url = `https://www.google.com/maps/dir/?api=1&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
-          } else {
-            // On desktop: Use destination only
-            const destCoords = `${formattedDestLat},${formattedDestLng}`
-            url = `https://www.google.com/maps/search/?api=1&query=${destCoords}`
-          }
-        }
-        
-        // Validate URL
-        if (url && url.startsWith('https://www.google.com/maps')) {
-          setGoogleMapsUrl(url)
-        } else {
-          setGoogleMapsUrl(null)
-        }
-      } catch (error) {
-        console.error('Error generating Google Maps URL:', error)
-        setGoogleMapsUrl(null)
-      } finally {
-        setGoogleMapsUrlLoading(false)
-      }
+    // SIMPLIFIED: Generate URL directly from sender location coordinates (stored as TEXT - exact GPS)
+    const senderLoc = locations.find(loc => loc && loc.user_id && String(loc.user_id) === String(emergency.user_id))
+    
+    if (!senderLoc) {
+      setGoogleMapsUrl(null)
+      return
     }
 
-    generateUrl()
-  }, [isSender, emergency?.user_id, locations, currentUserId])
+    // Coordinates are stored as TEXT - use directly (zero precision loss)
+    const destLatStr = typeof senderLoc.latitude === 'string' ? senderLoc.latitude : senderLoc.latitude.toString()
+    const destLngStr = typeof senderLoc.longitude === 'string' ? senderLoc.longitude : senderLoc.longitude.toString()
+    
+    // Simple, bulletproof: ?q=lat,lng format drops pin at exact coordinates
+    const url = getGoogleMapsUrl(destLatStr, destLngStr)
+    setGoogleMapsUrl(url)
+  }, [isSender, emergency?.user_id, locations])
 
   // Google Maps button - MUST be before early return to follow Rules of Hooks
   const googleMapsButton = useMemo(() => {
@@ -1521,231 +1146,78 @@ function EmergencyActive() {
         </div>
       </header>
 
-      {/* Google Maps */}
-      {GOOGLE_MAPS_API_KEY && (
-        <div className="map-container">
-          <GoogleMapsLoader>
-            {typeof window !== 'undefined' && (window as any).google?.maps ? (
-              <GoogleMap
-                mapContainerStyle={mapContainerStyle}
-                center={mapCenter}
-                zoom={locations.length > 0 ? 15 : 2}
-                onLoad={onMapLoad}
-                options={{
-                  streetViewControl: false,
-                  mapTypeControl: true,
-                  fullscreenControl: true,
-                }}
-              >
-              {/* Render markers for all locations - both sender and receiver */}
-              {/* Only render markers when Google Maps API is fully available and map is ready */}
-              {locations.length > 0 && emergency && emergency.user_id && 
-               typeof window !== 'undefined' && (window as any).google?.maps && 
-               mapLoaded && mapRef.current && locations.map((location, index) => {
-                // Validate location object
-                if (!location || !location.user_id) {
-                  return null
-                }
-                
-                // Validate coordinates
-                if (location.latitude === null || location.latitude === undefined ||
-                    location.longitude === null || location.longitude === undefined) {
-                  return null
-                }
-                
-                // Parse coordinates using unified function - MUST match Google Maps URL generation exactly
-                // This ensures map markers and directions URL use identical coordinates
-                const lat = parseCoordinate(location.latitude)
-                const lng = parseCoordinate(location.longitude)
-                
-                // Validate coordinate ranges
-                if (isNaN(lat) || isNaN(lng) || 
-                    lat < -90 || lat > 90 || 
-                    lng < -180 || lng > 180) {
-                  console.warn('Invalid coordinates:', { lat, lng, location, rawLat: location.latitude, rawLng: location.longitude })
-                  return null
-                }
-                
-                // Safe comparison with null checks
-                const isSenderLocation = emergency && emergency.user_id && location.user_id
-                  ? String(location.user_id) === String(emergency.user_id) 
-                  : false
-                const isCurrentUserLocation = currentUserId && location.user_id
-                  ? String(location.user_id) === String(currentUserId) 
-                  : false
-                
-                // Use exact coordinates for all markers (no offset, no rounding)
-                // These coordinates MUST match what's sent to Google Maps directions URL
-                // Store as numbers to ensure precision is maintained
-                const markerLat = lat
-                const markerLng = lng
-                
-                // Debug: Log coordinates to verify they match URL generation
-                // Always log sender location for debugging
-                if (isSenderLocation) {
-                  const formattedLat = formatCoordinate(markerLat)
-                  const formattedLng = formatCoordinate(markerLng)
-                  console.log('📍 Map Marker Coordinates (Sender):', {
-                    raw: { lat: location.latitude, lng: location.longitude },
-                    parsed: { lat: markerLat, lng: markerLng },
-                    formatted: { lat: formattedLat, lng: formattedLng },
-                    urlFormat: `${formattedLat},${formattedLng}`,
-                    databasePrecision: '8 decimal places (DECIMAL(10,8) and DECIMAL(11,8))'
-                  })
-                }
-                
-                // Double-check Google Maps is available and map is ready before rendering Marker
-                if (typeof window === 'undefined' || !(window as any).google?.maps?.Marker || !mapRef.current) {
-                  return null
-                }
-                
-                try {
-                  // Verify map is still valid before rendering marker
-                  if (!mapRef.current || !mapRef.current.getDiv || typeof mapRef.current.getDiv !== 'function') {
-                    return null
-                  }
-                  
-                  // Get icon - sender uses default red pin (undefined), receiver uses blue dot
-                  const markerIcon = isSenderLocation ? undefined : getMarkerIcon(false)
-                  
-                  return (
-                    <Marker
-                      key={`${location.user_id}-${location.timestamp || Date.now()}`}
-                      position={{ lat: markerLat, lng: markerLng }}
-                      icon={markerIcon}
-                      zIndex={isSenderLocation ? 1 : 2} // Blue dot (receiver) above red pin (sender)
-                      onClick={() => setSelectedLocation(location)}
-                      label={isSenderLocation ? {
-                        text: '🚨',
-                        color: '#F5FAFF', /* Lightest baby blue - replaces white */
-                        fontSize: '16px',
-                        fontWeight: 'bold'
-                      } : undefined}
-                    >
-                      {selectedLocation?.user_id === location.user_id && mapRef.current && (() => {
-                        // Calculate distance to other location
-                        let distanceText = ''
-                        if (isSenderLocation && !isSender) {
-                          // Responder viewing sender location - show distance from responder to sender
-                          const responderLoc = locations.find(loc => String(loc.user_id) === String(currentUserId))
-                          if (responderLoc) {
-                            const responderLat = parseCoordinate(responderLoc.latitude)
-                            const responderLng = parseCoordinate(responderLoc.longitude)
-                            const distance = calculateDistance(responderLat, responderLng, lat, lng)
-                            distanceText = formatDistance(distance)
-                          }
-                        } else if (!isSenderLocation && isSender) {
-                          // Sender viewing responder location - show distance from sender to responder
-                          const senderLoc = locations.find(loc => String(loc.user_id) === String(emergency.user_id))
-                          if (senderLoc) {
-                            const senderLat = parseCoordinate(senderLoc.latitude)
-                            const senderLng = parseCoordinate(senderLoc.longitude)
-                            const distance = calculateDistance(senderLat, senderLng, lat, lng)
-                            distanceText = formatDistance(distance)
-                          }
-                        } else if (!isSenderLocation && !isSender) {
-                          // Responder viewing another responder location - show distance from current responder
-                          const currentLoc = locations.find(loc => String(loc.user_id) === String(currentUserId))
-                          if (currentLoc) {
-                            const currentLat = parseCoordinate(currentLoc.latitude)
-                            const currentLng = parseCoordinate(currentLoc.longitude)
-                            const distance = calculateDistance(currentLat, currentLng, lat, lng)
-                            distanceText = formatDistance(distance)
-                          }
-                        }
-                        
-                        return (
-                          <InfoWindow onCloseClick={() => setSelectedLocation(null)}>
-                            <div>
-                              <strong>
-                                {isSenderLocation 
-                                  ? '🚨 Emergency Location (Sender)' 
-                                  : isCurrentUserLocation
-                                  ? '📍 Your Location (Responder)'
-                                  : '📍 Responder Location'}
-                              </strong>
-                              <br />
-                              <small>{location.user_display_name || location.user_email || 'Location'}</small>
-                              {distanceText && (
-                                <>
-                                  <br />
-                                  <small style={{ color: '#666', fontWeight: 'bold' }}>{distanceText}</small>
-                                </>
-                              )}
-                            </div>
-                          </InfoWindow>
-                        )
-                      })()}
-                    </Marker>
-                  )
-                } catch (error) {
-                  console.error('Error rendering marker:', error, location)
-                  return null
-                }
-              }).filter(Boolean)}
-              </GoogleMap>
-            ) : (
-              <div style={{ 
-                padding: '2rem', 
-                textAlign: 'center',
-                backgroundColor: '#C5E1F5', /* Medium baby blue - replaces grey */
+      {/* Emergency Location - Direct Google Maps Link */}
+      {senderLocation && (
+        <div className="location-container" style={{
+          padding: '1.5rem',
+          backgroundColor: '#E8F4F8',
+          borderRadius: '8px',
+          margin: '1rem 0',
+          textAlign: 'center'
+        }}>
+          <h2 style={{ marginTop: 0, marginBottom: '1rem' }}>📍 Emergency Location</h2>
+          <p style={{ marginBottom: '1rem', color: '#666' }}>
+            {senderLocation.user_display_name || senderLocation.user_email || 'Sender'} needs help
+          </p>
+          {googleMapsUrl && (
+            <a
+              href={googleMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-block',
+                padding: '12px 24px',
+                backgroundColor: '#4285F4',
+                color: 'white',
+                textDecoration: 'none',
                 borderRadius: '8px',
-                margin: '1rem 0'
-              }}>
-                <p style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>
-                  Loading Google Maps...
-                </p>
-                <p style={{ color: '#666', fontSize: '0.9rem' }}>
-                  Please wait while the map loads
-                </p>
-              </div>
-            )}
-          </GoogleMapsLoader>
-          {locations.length === 0 && (
-            <div className="map-placeholder" style={{
-              padding: '2rem',
-              textAlign: 'center',
-              backgroundColor: '#C5E1F5', /* Medium baby blue - replaces grey */
-              borderRadius: '8px',
-              margin: '1rem 0'
-            }}>
-              <p style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>
-                📍 Waiting for emergency location...
-              </p>
-              <p className="map-hint" style={{ color: '#666', fontSize: '0.9rem' }}>
-                Emergency location will appear here once shared
-              </p>
-              {emergency && String(emergency.user_id) === String(currentUserId) && (
-                <p style={{ color: '#999', fontSize: '0.85rem', marginTop: '0.5rem' }}>
-                  If your location doesn't appear, please allow location access in Safari settings.
-                </p>
-              )}
-            </div>
+                fontSize: '1.1rem',
+                fontWeight: 'bold',
+                marginTop: '0.5rem'
+              }}
+            >
+              🗺️ Get Directions in Google Maps
+            </a>
           )}
-          
-          {error && (
-            <div style={{
-              padding: '1rem',
-              backgroundColor: '#D4E8F5', /* Lighter medium baby blue - replaces yellow */
-              border: '1px solid #B3D9FF', /* Darker baby blue border */
-              borderRadius: '8px',
-              margin: '1rem 0',
-              color: '#4A6FA5' /* Darker blue text for contrast */
-            }}>
-              <strong>⚠️ Warning:</strong> {error}
-            </div>
+          {!googleMapsUrl && (
+            <p style={{ color: '#999', fontSize: '0.9rem' }}>
+              Generating directions link...
+            </p>
           )}
         </div>
       )}
-
-      {!GOOGLE_MAPS_API_KEY && (
-        <div className="map-warning">
-          <p>⚠️ Google Maps API key not configured</p>
-          <p className="map-hint">Add VITE_GOOGLE_MAPS_API_KEY to your .env file to enable maps</p>
+      
+      {!senderLocation && locations.length === 0 && (
+        <div className="location-placeholder" style={{
+          padding: '2rem',
+          textAlign: 'center',
+          backgroundColor: '#E8F4F8',
+          borderRadius: '8px',
+          margin: '1rem 0'
+        }}>
+          <p style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>
+            📍 Waiting for emergency location...
+          </p>
+          <p style={{ color: '#666', fontSize: '0.9rem' }}>
+            Emergency location will appear here once shared
+          </p>
+        </div>
+      )}
+      
+      {error && (
+        <div style={{
+          padding: '1rem',
+          backgroundColor: '#FFF3CD',
+          border: '1px solid #FFC107',
+          borderRadius: '8px',
+          margin: '1rem 0',
+          color: '#856404'
+        }}>
+          <strong>⚠️ Warning:</strong> {error}
         </div>
       )}
 
-      {/* Google Maps directions - only for responders */}
+      {/* Google Maps directions - Direct link with exact coordinates */}
       {googleMapsButton}
 
       {/* Emergency Chat */}

@@ -98,13 +98,18 @@ export class Emergency {
   static async addLocation(
     emergencyId: string,
     userId: string,
-    latitude: number,
-    longitude: number
+    latitude: number | string,
+    longitude: number | string
   ): Promise<void> {
+    // Convert to string to preserve exact GPS precision (zero precision loss)
+    // Store as TEXT in database - exact coordinates as received from GPS
+    const latStr = typeof latitude === 'string' ? latitude : latitude.toString()
+    const lngStr = typeof longitude === 'string' ? longitude : longitude.toString()
+    
     await query(
       `INSERT INTO emergency_locations (emergency_id, user_id, latitude, longitude) 
        VALUES ($1, $2, $3, $4)`,
-      [emergencyId, userId, latitude, longitude]
+      [emergencyId, userId, latStr, lngStr]
     );
   }
 
