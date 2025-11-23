@@ -292,7 +292,6 @@ function EmergencyActive() {
             userId: currentUserId,
             emergencyId: id,
             isSender: senderCheck,
-            errorName: err.name,
             protocol: window.location.protocol,
             hostname: window.location.hostname,
             userAgent: navigator.userAgent,
@@ -454,7 +453,7 @@ function EmergencyActive() {
         } else {
           console.warn('⚠️ [DEBUG] Sender location not found in unique locations', {
             senderUserId: emergencyData.user_id,
-            uniqueLocationUserIds: uniqueLocations.map(l => l.user_id)
+            uniqueLocationUserIds: uniqueLocations.map((l: Location) => l.user_id)
           })
         }
         
