@@ -29,6 +29,36 @@ if (typeof window !== 'undefined' && import.meta.env.DEV) {
   };
 }
 
+// Initialize log collector early to capture all logs
+import './utils/logCollector'
+
+// Load Eruda dynamically for mobile debugging
+// Only loads if ?eruda=true is in URL, or on localhost/network IP
+if (typeof window !== 'undefined') {
+  const shouldLoadEruda =
+    window.location.search.includes('eruda=true') ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname.includes('192.168.') ||
+    window.location.hostname.includes('127.0.0.1')
+
+  if (shouldLoadEruda) {
+    // Dynamically load Eruda from CDN
+    const script = document.createElement('script')
+    script.src = 'https://cdn.jsdelivr.net/npm/eruda'
+    script.onload = () => {
+      // Initialize Eruda after it loads
+      if ((window as any).eruda) {
+        (window as any).eruda.init()
+        console.log('✅ Eruda console initialized')
+      }
+    }
+    script.onerror = () => {
+      console.error('❌ Failed to load Eruda')
+    }
+    document.head.appendChild(script)
+  }
+}
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.tsx'
