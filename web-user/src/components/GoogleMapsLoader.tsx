@@ -1,5 +1,4 @@
 import { useState, useEffect, ReactNode, useRef } from 'react'
-import { LoadScript } from '@react-google-maps/api'
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 
@@ -77,55 +76,55 @@ export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
       return cleanup
     }
 
-    // If script is not loaded and not loading, try manual injection as fallback (especially for mobile)
+    // PRIMARY METHOD: Manual script injection (works best, especially on mobile)
     if (!isScriptLoaded() && !scriptLoadingRef.current && GOOGLE_MAPS_API_KEY) {
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-      if (isMobile) {
-        // On mobile, try manual script injection as fallback
-        console.log('📱 Mobile detected - attempting manual Google Maps script injection')
-        setIsLoading(true)
-        scriptLoadingRef.current = true
-        
-        // Check if script already exists
-        const existingScripts = document.querySelectorAll('script[src*="maps.googleapis.com"]')
-        if (existingScripts.length === 0) {
-          // Inject script manually
-          const script = document.createElement('script')
-          script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
-          script.async = true
-          script.defer = true
-          script.onload = () => {
-            console.log('✅ Google Maps script loaded manually (mobile)')
-            // Wait for initialization
-            const checkReady = (attempt = 0) => {
-              if (isGoogleMapsReady()) {
-                scriptLoadingRef.current = false
-                setIsReady(true)
-                setIsLoading(false)
-                cleanup()
-              } else if (attempt < 50) {
-                retryTimeoutRef.current = setTimeout(() => checkReady(attempt + 1), 300)
-              } else {
-                scriptLoadingRef.current = false
-                setIsLoading(false)
-                console.warn('⚠️ Manual script injection: Google Maps not ready after loading')
-              }
+      console.log('🔍 Injecting Google Maps script manually...')
+      setIsLoading(true)
+      scriptLoadingRef.current = true
+      
+      // Check if script already exists
+      const existingScripts = document.querySelectorAll('script[src*="maps.googleapis.com"]')
+      if (existingScripts.length === 0) {
+        // Inject script manually
+        const script = document.createElement('script')
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places`
+        script.async = true
+        script.defer = true
+        script.onload = () => {
+          console.log('✅ Google Maps script loaded manually')
+          // Wait for initialization
+          const checkReady = (attempt = 0, maxAttempts = 50) => {
+            if (isGoogleMapsReady()) {
+              scriptLoadingRef.current = false
+              setIsReady(true)
+              setIsLoading(false)
+              cleanup()
+              console.log('✅ Google Maps API ready (manual injection)')
+              return
             }
-            retryTimeoutRef.current = setTimeout(() => checkReady(), 1000)
+            if (attempt < maxAttempts) {
+              retryTimeoutRef.current = setTimeout(() => checkReady(attempt + 1, maxAttempts), 300)
+            } else {
+              scriptLoadingRef.current = false
+              setIsLoading(false)
+              console.warn('⚠️ Manual script injection: window.google.maps not available after multiple attempts')
+              setError('Google Maps API failed to initialize after manual injection.')
+            }
           }
-          script.onerror = () => {
-            scriptLoadingRef.current = false
-            setIsLoading(false)
-            console.error('❌ Failed to load Google Maps script manually')
-            // Fallback to LoadScript
-          }
-          document.head.appendChild(script)
-          return cleanup
+          retryTimeoutRef.current = setTimeout(() => checkReady(), 1000)
         }
+        script.onerror = (e) => {
+          console.error('❌ Manual Google Maps script load error:', e)
+          scriptLoadingRef.current = false
+          setIsLoading(false)
+          setError('Failed to load Google Maps script manually. Check API key and network.')
+        }
+        document.head.appendChild(script)
+        return cleanup
       }
     }
 
-    // Check periodically if maps loaded (in case script loads asynchronously)
+    // Fallback: Check periodically if maps loaded (in case script loads asynchronously by other means)
     setIsLoading(true)
     checkIntervalRef.current = setInterval(() => {
       if (isGoogleMapsReady()) {
@@ -220,93 +219,10 @@ export const GoogleMapsLoader = ({ children }: GoogleMapsLoaderProps) => {
     )
   }
 
-  // If script is already loading or loaded, wait for it
-  if (scriptLoadingRef.current || isScriptLoaded()) {
-    return (
-      <div style={{ padding: '20px', textAlign: 'center' }}>
-        {isLoading && <p>Loading Google Maps...</p>}
-      </div>
-    )
-  }
-
-  // Mark as loading and create LoadScript instance
-  scriptLoadingRef.current = true
-  setIsLoading(true)
-
-  // Use LoadScript to load the API
+  // Show loading state
   return (
-    <LoadScript 
-      googleMapsApiKey={GOOGLE_MAPS_API_KEY}
-      loadingElement={<div style={{ padding: '20px', textAlign: 'center' }}>Loading Google Maps...</div>}
-      onLoad={() => {
-        // Wait longer and check multiple times to ensure google.maps is fully initialized
-        const checkReady = (attempt = 0, maxAttempts = 40) => { // Increased from 20 to 40
-          if (isGoogleMapsReady()) {
-            // Verify Map class is available (required for GoogleMap component)
-            const win = window as Record<string, any>
-            if (win['google']?.maps?.Map) {
-              scriptLoadingRef.current = false
-              setIsReady(true)
-              setIsLoading(false)
-              console.log('✅ Google Maps API loaded successfully')
-              return
-            }
-          }
-          
-          if (attempt < maxAttempts) {
-            retryTimeoutRef.current = setTimeout(() => checkReady(attempt + 1, maxAttempts), 300) // Increased from 200ms to 300ms
-          } else {
-            console.warn('⚠️ LoadScript onLoad fired but window.google.maps not available after multiple attempts')
-            scriptLoadingRef.current = false
-            setIsLoading(false)
-            setError('Google Maps API failed to initialize. Please check your API key and network connection.')
-            // Final retry after longer delay
-            retryTimeoutRef.current = setTimeout(() => {
-              if (isGoogleMapsReady()) {
-                scriptLoadingRef.current = false
-                setIsReady(true)
-                setIsLoading(false)
-                setError(null)
-                console.log('✅ Google Maps API loaded (delayed)')
-              }
-            }, 3000) // Increased from 2000ms to 3000ms
-          }
-        }
-        
-        // Start checking after initial delay (increased from 500ms to 1000ms)
-        retryTimeoutRef.current = setTimeout(() => checkReady(), 1000)
-      }}
-      onError={(error) => {
-        scriptLoadingRef.current = false
-        setIsLoading(false)
-        console.error('❌ Google Maps load error:', error)
-        
-        // If script already exists, check if it's ready
-        if (isScriptLoaded()) {
-          retryTimeoutRef.current = setTimeout(() => {
-            if (isGoogleMapsReady()) {
-              scriptLoadingRef.current = false
-              setIsReady(true)
-              setIsLoading(false)
-              setError(null)
-              console.log('✅ Google Maps API already loaded (recovered from error)')
-            } else {
-              // Retry loading the script after 3 seconds
-              retryTimeoutRef.current = setTimeout(() => {
-                handleRetry()
-              }, 3000)
-            }
-          }, 1000)
-        } else {
-          // No script found, set error and allow retry
-          setError('Failed to load Google Maps script. Please check your internet connection and API key configuration.')
-        }
-      }}
-    >
-      {/* Only render children when API is ready */}
-      {isReady && isGoogleMapsReady() ? children : (
-        <div style={{ padding: '20px', textAlign: 'center' }}>Loading Google Maps...</div>
-      )}
-    </LoadScript>
+    <div style={{ padding: '20px', textAlign: 'center' }}>
+      <p>Loading Google Maps...</p>
+    </div>
   )
 }

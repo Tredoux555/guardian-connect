@@ -686,15 +686,17 @@ function EmergencyActive() {
       
       if (isMobile) {
         // On mobile: Use destination only - Google Maps uses device GPS
-        // Use raw coordinate format - Google Maps should parse lat,lng directly
-        const url = `https://www.google.com/maps/dir/?api=1&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
+        // Use @ prefix to explicitly mark coordinates (prevents geocoding)
+        // Format: destination=@lat,lng tells Google Maps these are GPS coordinates, not an address
+        const url = `https://www.google.com/maps/dir/?api=1&destination=@${formattedDestLat},${formattedDestLng}&travelmode=driving`
         console.log('🔗 Step 9: Final Google Maps URL (Mobile):', {
           url,
-          destinationCoords: `${formattedDestLat},${formattedDestLng}`,
+          destinationCoords: `@${formattedDestLat},${formattedDestLng}`,
           formattedLat: formattedDestLat,
           formattedLng: formattedDestLng,
           userAgent: navigator.userAgent,
-          isMobile: true
+          isMobile: true,
+          note: 'Using @ prefix to force GPS coordinates (no geocoding)'
         })
         return url
       } else {
@@ -704,28 +706,29 @@ function EmergencyActive() {
         
         // Validate origin
         if (formattedOriginLat === '0' || formattedOriginLng === '0') {
-          const destCoords = `${formattedDestLat},${formattedDestLng}`
-          // Use coordinates directly - no encoding needed for comma
+          const destCoords = `@${formattedDestLat},${formattedDestLng}`
+          // Use @ prefix to force GPS coordinates
           return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
         }
         
         // Check if origin and destination are identical
         if (formattedOriginLat === formattedDestLat && formattedOriginLng === formattedDestLng) {
-          const destCoords = `${formattedDestLat},${formattedDestLng}`
+          const destCoords = `@${formattedDestLat},${formattedDestLng}`
           return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
         }
         
-        // Use coordinates directly - Google Maps will parse them as GPS coordinates
-        // Format: origin=lat,lng&destination=lat,lng (no encoding needed for comma)
-        const url = `https://www.google.com/maps/dir/?api=1&origin=${formattedOriginLat},${formattedOriginLng}&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
+        // Use @ prefix to explicitly mark coordinates (prevents geocoding)
+        // Format: origin=@lat,lng&destination=@lat,lng tells Google Maps these are GPS coordinates
+        const url = `https://www.google.com/maps/dir/?api=1&origin=@${formattedOriginLat},${formattedOriginLng}&destination=@${formattedDestLat},${formattedDestLng}&travelmode=driving`
         console.log('🔗 Step 9: Final Google Maps URL (Desktop):', {
           url,
-          origin: `${formattedOriginLat},${formattedOriginLng}`,
-          destination: `${formattedDestLat},${formattedDestLng}`,
+          origin: `@${formattedOriginLat},${formattedOriginLng}`,
+          destination: `@${formattedDestLat},${formattedDestLng}`,
           formattedOriginLat,
           formattedOriginLng,
           formattedDestLat,
-          formattedDestLng
+          formattedDestLng,
+          note: 'Using @ prefix to force GPS coordinates (no geocoding)'
         })
         return url
       }
@@ -735,8 +738,8 @@ function EmergencyActive() {
       // Fallback to destination only using string values
       const formattedDestLat = formatCoordinate(destLat)
       const formattedDestLng = formatCoordinate(destLng)
-      const destCoords = `${formattedDestLat},${formattedDestLng}`
-      // Use coordinates directly without encoding
+      const destCoords = `@${formattedDestLat},${formattedDestLng}`
+      // Use @ prefix to force GPS coordinates
       return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
     }
   }
