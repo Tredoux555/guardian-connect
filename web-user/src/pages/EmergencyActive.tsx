@@ -795,21 +795,21 @@ function EmergencyActive() {
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
       
       if (isMobile) {
-        // NEW APPROACH: Use '@lat,lng,zoom' format in directions URL
-        // This format explicitly marks coordinates and opens directly in navigation mode
-        // The zoom level (20) ensures maximum precision, prevents geocoding/snapping
-        // Format: https://www.google.com/maps/dir/?api=1&destination=@lat,lng,20z&travelmode=driving
-        const url = `https://www.google.com/maps/dir/?api=1&destination=@${destLatStr},${destLngStr},20z&travelmode=driving`
+        // Use standard destination format without @ symbol
+        // The @ format is only for base URL paths, not URL parameters
+        // Format: https://www.google.com/maps/dir/?api=1&destination=lat,lng&travelmode=driving
+        // Note: Google Maps may snap to nearest road for navigation (this is expected behavior)
+        const url = `https://www.google.com/maps/dir/?api=1&destination=${destLatStr},${destLngStr}&travelmode=driving`
         
-        console.log('🔗 Step 9: Final Google Maps URL (Mobile - @ format):', {
+        console.log('🔗 Step 9: Final Google Maps URL (Mobile - directions):', {
           url,
           destinationCoords: `${destLatStr},${destLngStr}`,
           formattedLat: destLatNum,
           formattedLng: destLngNum,
           userAgent: navigator.userAgent,
           isMobile: true,
-          format: '@lat,lng,zoom format (explicit coordinates, opens in navigation)',
-          note: 'Opens directly in navigation mode with exact coordinates, prevents snapping to roads'
+          format: 'standard directions format (destination=lat,lng)',
+          note: 'Opens directly in navigation mode. Google Maps may snap to nearest road for routing (expected behavior)'
         })
         refreshErudaConsole()
         return url
