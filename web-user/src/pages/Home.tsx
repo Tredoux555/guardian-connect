@@ -9,6 +9,7 @@ import {
 } from '../services/notifications'
 import { getCurrentUserId } from '../utils/jwt'
 import { FEATURES } from '../utils/featureFlags'
+import { LogViewer } from '../components/LogViewer'
 import './Home.css'
 
 function Home() {
@@ -391,6 +392,7 @@ function Home() {
           )}
         </div>
       </main>
+      <LogViewer />
     </div>
   )
 }

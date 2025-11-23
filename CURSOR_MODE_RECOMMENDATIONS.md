@@ -49,3 +49,4 @@ Only use Composer1 when:
 - **Recommendation**: ✅ **Auto** - Simple enough, saves credits
 - **Result**: Same build integrity, faster, cheaper
 
+
