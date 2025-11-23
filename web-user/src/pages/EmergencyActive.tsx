@@ -795,21 +795,21 @@ function EmergencyActive() {
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
       
       if (isMobile) {
-        // Use standard destination format without @ symbol
-        // The @ format is only for base URL paths, not URL parameters
-        // Format: https://www.google.com/maps/dir/?api=1&destination=lat,lng&travelmode=driving
-        // Note: Google Maps may snap to nearest road for navigation (this is expected behavior)
-        const url = `https://www.google.com/maps/dir/?api=1&destination=${destLatStr},${destLngStr}&travelmode=driving`
+        // Use search URL format to show exact location with dropped pin
+        // This prevents snapping - shows exact coordinates, user can tap Directions if needed
+        // Format: https://www.google.com/maps?q=lat,lng
+        // This drops a pin at the exact coordinates without snapping to roads
+        const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
         
-        console.log('🔗 Step 9: Final Google Maps URL (Mobile - directions):', {
+        console.log('🔗 Step 9: Final Google Maps URL (Mobile - exact location):', {
           url,
           destinationCoords: `${destLatStr},${destLngStr}`,
           formattedLat: destLatNum,
           formattedLng: destLngNum,
           userAgent: navigator.userAgent,
           isMobile: true,
-          format: 'standard directions format (destination=lat,lng)',
-          note: 'Opens directly in navigation mode. Google Maps may snap to nearest road for routing (expected behavior)'
+          format: 'search URL (shows exact location with dropped pin)',
+          note: 'Shows exact coordinates with dropped pin. User can tap Directions button for navigation if needed.'
         })
         refreshErudaConsole()
         return url
