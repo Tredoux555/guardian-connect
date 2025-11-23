@@ -686,17 +686,17 @@ function EmergencyActive() {
       
       if (isMobile) {
         // On mobile: Use destination only - Google Maps uses device GPS
-        // Use @ prefix to explicitly mark coordinates (prevents geocoding)
-        // Format: destination=@lat,lng tells Google Maps these are GPS coordinates, not an address
-        const url = `https://www.google.com/maps/dir/?api=1&destination=@${formattedDestLat},${formattedDestLng}&travelmode=driving`
+        // Format: destination=lat,lng (standard format - @ prefix not supported in destination param)
+        // The coordinates are precise enough (8 decimals) that geocoding should be minimal
+        const url = `https://www.google.com/maps/dir/?api=1&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
         console.log('🔗 Step 9: Final Google Maps URL (Mobile):', {
           url,
-          destinationCoords: `@${formattedDestLat},${formattedDestLng}`,
+          destinationCoords: `${formattedDestLat},${formattedDestLng}`,
           formattedLat: formattedDestLat,
           formattedLng: formattedDestLng,
           userAgent: navigator.userAgent,
           isMobile: true,
-          note: 'Using @ prefix to force GPS coordinates (no geocoding)'
+          note: 'Using standard destination=lat,lng format (8 decimal precision)'
         })
         return url
       } else {
@@ -706,29 +706,30 @@ function EmergencyActive() {
         
         // Validate origin
         if (formattedOriginLat === '0' || formattedOriginLng === '0') {
-          const destCoords = `@${formattedDestLat},${formattedDestLng}`
-          // Use @ prefix to force GPS coordinates
-          return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+          const destCoords = `${formattedDestLat},${formattedDestLng}`
+          // Use search format with @ prefix for query parameter (this format supports @)
+          return `https://www.google.com/maps/search/?api=1&query=@${destCoords}`
         }
         
         // Check if origin and destination are identical
         if (formattedOriginLat === formattedDestLat && formattedOriginLng === formattedDestLng) {
-          const destCoords = `@${formattedDestLat},${formattedDestLng}`
-          return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+          const destCoords = `${formattedDestLat},${formattedDestLng}`
+          return `https://www.google.com/maps/search/?api=1&query=@${destCoords}`
         }
         
-        // Use @ prefix to explicitly mark coordinates (prevents geocoding)
-        // Format: origin=@lat,lng&destination=@lat,lng tells Google Maps these are GPS coordinates
-        const url = `https://www.google.com/maps/dir/?api=1&origin=@${formattedOriginLat},${formattedOriginLng}&destination=@${formattedDestLat},${formattedDestLng}&travelmode=driving`
+        // Use standard format: origin=lat,lng&destination=lat,lng
+        // The @ prefix is NOT supported in origin/destination parameters for directions
+        // 8 decimal precision should minimize geocoding inaccuracies
+        const url = `https://www.google.com/maps/dir/?api=1&origin=${formattedOriginLat},${formattedOriginLng}&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
         console.log('🔗 Step 9: Final Google Maps URL (Desktop):', {
           url,
-          origin: `@${formattedOriginLat},${formattedOriginLng}`,
-          destination: `@${formattedDestLat},${formattedDestLng}`,
+          origin: `${formattedOriginLat},${formattedOriginLng}`,
+          destination: `${formattedDestLat},${formattedDestLng}`,
           formattedOriginLat,
           formattedOriginLng,
           formattedDestLat,
           formattedDestLng,
-          note: 'Using @ prefix to force GPS coordinates (no geocoding)'
+          note: 'Using standard origin/destination format (8 decimal precision)'
         })
         return url
       }
@@ -738,9 +739,9 @@ function EmergencyActive() {
       // Fallback to destination only using string values
       const formattedDestLat = formatCoordinate(destLat)
       const formattedDestLng = formatCoordinate(destLng)
-      const destCoords = `@${formattedDestLat},${formattedDestLng}`
-      // Use @ prefix to force GPS coordinates
-      return `https://www.google.com/maps/search/?api=1&query=${destCoords}`
+      const destCoords = `${formattedDestLat},${formattedDestLng}`
+      // Use search format with @ prefix (this format supports @ in query parameter)
+      return `https://www.google.com/maps/search/?api=1&query=@${destCoords}`
     }
   }
 
