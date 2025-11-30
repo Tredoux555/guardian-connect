@@ -211,6 +211,16 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
             } else {
               debugPrint('❌ DEBUG: Sender location NOT found in locations array!');
               debugPrint('❌ DEBUG: Available user_ids: ${locationsList.map((l) => l['user_id']).toList()}');
+              debugPrint('⚠️ WARNING: Sender location missing - map will not center correctly');
+              debugPrint('💡 This may happen if sender has not shared location yet - will retry...');
+              
+              // Retry loading emergency data after a delay to get sender's location
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted && _emergencyLocation == null) {
+                  debugPrint('🔄 Retrying to load sender location...');
+                  _loadEmergencyData();
+                }
+              });
             }
           } catch (e) {
             debugPrint('⚠️ Could not find sender location: $e');
@@ -552,20 +562,35 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
       ),
       body: _currentPosition == null
           ? const Center(
-              child: CircularProgressIndicator(),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Getting your location...'),
+                ],
+              ),
             )
           : _mapError != null
               ? _buildMapFallback()
-              : _currentPosition == null
-                  ? const Center(
+              : _emergencyLocation == null
+                  ? Center(
                       child: Padding(
-                        padding: EdgeInsets.all(20.0),
+                        padding: const EdgeInsets.all(20.0),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            CircularProgressIndicator(),
-                            SizedBox(height: 16),
-                            Text('Getting your location...'),
+                            const CircularProgressIndicator(),
+                            const SizedBox(height: 16),
+                            const Text('Loading emergency location...'),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Waiting for sender\'s location',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 12,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -574,11 +599,9 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                       children: [
                         GoogleMap(
                           initialCameraPosition: CameraPosition(
-                            // Center on emergency location if available, otherwise use current position
-                            target: _emergencyLocation ?? 
-                                    (_currentPosition != null 
-                                      ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
-                                      : const LatLng(0, 0)),
+                            // ALWAYS center on emergency location (sender's location)
+                            // Don't fall back to receiver's location - that's wrong!
+                            target: _emergencyLocation ?? const LatLng(0, 0),
                             zoom: 15,
                           ),
                           markers: _markers,
@@ -593,16 +616,17 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                                 _mapError = null;
                               });
                             }
-                            // Move camera to emergency location (or current position) when map is ready
+                            // Move camera to emergency location (sender's location) when map is ready
+                            // IMPORTANT: Only use sender's location, NOT receiver's location
                             try {
-                              final targetLocation = _emergencyLocation ?? 
-                                    (_currentPosition != null 
-                                      ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
-                                      : null);
-                              if (targetLocation != null) {
+                              if (_emergencyLocation != null) {
                                 controller.animateCamera(
-                                  CameraUpdate.newLatLng(targetLocation),
+                                  CameraUpdate.newLatLng(_emergencyLocation!),
                                 );
+                                debugPrint('✅ Map centered on sender location: ${_emergencyLocation!.latitude}, ${_emergencyLocation!.longitude}');
+                              } else {
+                                debugPrint('⚠️ Sender location not available yet - map will center when location is loaded');
+                                // Don't center on receiver's location - wait for sender's location
                               }
                             } catch (e) {
                               debugPrint('⚠️ Error animating camera: $e');
