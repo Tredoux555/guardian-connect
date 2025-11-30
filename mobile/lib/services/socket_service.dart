@@ -77,16 +77,18 @@ class SocketService {
       }
       
       // Build socket options
+      // For Railway compatibility, use polling only (WebSocket upgrades may fail)
       final options = IO.OptionBuilder()
-          .setTransports(['polling', 'websocket']) // Try polling first, then upgrade
+          .setTransports(['polling']) // Use polling only for Railway compatibility
           .setAuth({'token': token})
           .enableAutoConnect()
-          .setTimeout(30000) // Increase timeout to 30 seconds
+          .setTimeout(60000) // Increase timeout to 60 seconds for Railway
           .setPath('/socket.io/') // Explicit path for socket.io
           .setReconnection(true)
           .setReconnectionAttempts(3)
-          .setReconnectionDelay(1000)
-          .setReconnectionDelayMax(5000);
+          .setReconnectionDelay(2000)
+          .setReconnectionDelayMax(10000)
+          .setForceNew(true); // Force new connection
       
       // Only add ngrok headers if configured (for development/ngrok)
       if (AppConfig.includeNgrokHeaders) {
@@ -154,14 +156,15 @@ class SocketService {
         }
       });
       
-      // Wait up to 15 seconds for connection (reduced from 20 for faster failure)
+      // Wait up to 45 seconds for connection (Railway may be slow)
       try {
         final connectedSocket = await completer.future.timeout(
-          const Duration(seconds: 15),
+          const Duration(seconds: 45),
           onTimeout: () {
             _isConnecting = false;
-            debugPrint('⚠️ Socket connection timed out after 15 seconds');
+            debugPrint('⚠️ Socket connection timed out after 45 seconds');
             debugPrint('   Socket.io may not be available - app will work without real-time features');
+            debugPrint('   This is common on Railway - polling will handle emergency detection');
             return null;
           },
         );
