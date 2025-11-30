@@ -83,12 +83,7 @@ class SocketService {
           .setAuth({'token': token})
           .enableAutoConnect()
           .setTimeout(60000) // Increase timeout to 60 seconds for Railway
-          .setPath('/socket.io/') // Explicit path for socket.io
-          .setReconnection(true)
-          .setReconnectionAttempts(3)
-          .setReconnectionDelay(2000)
-          .setReconnectionDelayMax(10000)
-          .setForceNew(true); // Force new connection
+          .setPath('/socket.io/'); // Explicit path for socket.io
       
       // Only add ngrok headers if configured (for development/ngrok)
       if (AppConfig.includeNgrokHeaders) {
