@@ -28,6 +28,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<String> _seenEmergencyIds = {};
   bool _hasNavigatedToEmergency = false;
   bool _isCreatingEmergency = false; // Prevent double emergency creation
+  bool _pollingPaused = false; // Pause polling during emergency creation
+  DateTime? _lastDependencyCheck; // Debounce didChangeDependencies calls
 
   @override
   void initState() {
@@ -51,20 +53,47 @@ class _HomeScreenState extends State<HomeScreen> {
     super.didChangeDependencies();
     // Reset navigation flag when returning to this screen
     _hasNavigatedToEmergency = false;
+    
+    // Debounce: Only check if it's been at least 3 seconds since last check
+    final now = DateTime.now();
+    if (_lastDependencyCheck != null && 
+        now.difference(_lastDependencyCheck!).inSeconds < 3) {
+      return; // Skip if called too frequently
+    }
+    _lastDependencyCheck = now;
+    
+    // Don't check if creating emergency or polling is paused
+    if (_isCreatingEmergency || _pollingPaused) {
+      return;
+    }
+    
     // Only refresh emergency check, don't re-setup socket listener
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkActiveEmergency();
-      _checkPendingEmergencies();
+      if (!_isCreatingEmergency && !_pollingPaused && mounted) {
+        _checkActiveEmergency();
+        _checkPendingEmergencies();
+      }
     });
   }
 
   void _startPendingEmergencyPolling() {
+    // Don't poll if paused or creating emergency
+    if (_pollingPaused || _isCreatingEmergency || !mounted) {
+      // Retry after a delay if paused
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted && !_pollingPaused && !_isCreatingEmergency) {
+          _startPendingEmergencyPolling();
+        }
+      });
+      return;
+    }
+    
     // Aggressive polling: 3 seconds for first 20 polls (1 minute), then every 8 seconds
     final pollInterval = _pollCount < 20 ? 3 : 8;
     _pollCount++;
     
     Future.delayed(Duration(seconds: pollInterval), () {
-      if (mounted) {
+      if (mounted && !_pollingPaused && !_isCreatingEmergency) {
         _checkPendingEmergencies();
         _startPendingEmergencyPolling();
       }
@@ -72,7 +101,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _checkPendingEmergencies() async {
-    if (_isCheckingPending) {
+    // Skip if already checking, creating emergency, or polling is paused
+    if (_isCheckingPending || _isCreatingEmergency || _pollingPaused) {
       return;
     }
     
@@ -314,6 +344,8 @@ class _HomeScreenState extends State<HomeScreen> {
     
     // Set flag to prevent double creation
     _isCreatingEmergency = true;
+    _pollingPaused = true; // Pause polling during emergency creation
+    debugPrint('⏸️ Pausing polling during emergency creation');
     
     // Store the navigator reference BEFORE showing dialog
     final navigator = Navigator.of(context);
@@ -493,6 +525,16 @@ class _HomeScreenState extends State<HomeScreen> {
       // Always reset the flag, even if there was an error
       _isCreatingEmergency = false;
       debugPrint('✅ Emergency creation flag reset');
+      
+      // Resume polling after a short delay to avoid immediate checks
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _pollingPaused = false;
+          debugPrint('▶️ Resuming polling after emergency creation');
+          // Restart polling if it was stopped
+          _startPendingEmergencyPolling();
+        }
+      });
     }
   }
 
