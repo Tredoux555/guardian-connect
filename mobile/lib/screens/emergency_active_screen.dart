@@ -164,15 +164,30 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
       final data = jsonDecode(response.body);
       debugPrint('📡 Emergency data loaded successfully');
       
+      // DEBUG: Log the full response structure
+      debugPrint('🔍 DEBUG: Emergency object: ${data['emergency']}');
+      debugPrint('🔍 DEBUG: Locations array length: ${data['locations']?.length ?? 0}');
+      if (data['locations'] != null && (data['locations'] as List).isNotEmpty) {
+        debugPrint('🔍 DEBUG: Locations array:');
+        for (var i = 0; i < (data['locations'] as List).length; i++) {
+          final loc = data['locations'][i];
+          debugPrint('   Location $i: user_id=${loc['user_id']}, lat=${loc['latitude']}, lng=${loc['longitude']}');
+        }
+      }
+      
       // Extract emergency location (sender's location)
       if (data['emergency'] != null && data['locations'] != null) {
         final emergency = data['emergency'];
         final senderUserId = emergency['user_id'] as String?;
+        debugPrint('🔍 DEBUG: Sender user_id from emergency: $senderUserId');
         
         // Find sender's location in the locations array
         if (senderUserId != null) {
           try {
-            final senderLocation = (data['locations'] as List).firstWhere(
+            final locationsList = data['locations'] as List;
+            debugPrint('🔍 DEBUG: Searching through ${locationsList.length} locations for sender: $senderUserId');
+            
+            final senderLocation = locationsList.firstWhere(
               (loc) => loc['user_id'] == senderUserId,
               orElse: () => null,
             );
@@ -189,12 +204,25 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                 _mapController!.animateCamera(
                   CameraUpdate.newLatLng(_emergencyLocation!),
                 );
+                debugPrint('✅ Map centered on emergency location');
+              } else {
+                debugPrint('⚠️ Map controller not ready yet, will center when map loads');
               }
+            } else {
+              debugPrint('❌ DEBUG: Sender location NOT found in locations array!');
+              debugPrint('❌ DEBUG: Available user_ids: ${locationsList.map((l) => l['user_id']).toList()}');
             }
           } catch (e) {
             debugPrint('⚠️ Could not find sender location: $e');
+            debugPrint('   Error type: ${e.runtimeType}');
           }
+        } else {
+          debugPrint('❌ DEBUG: senderUserId is null!');
         }
+      } else {
+        debugPrint('❌ DEBUG: Emergency or locations data missing!');
+        debugPrint('   Emergency exists: ${data['emergency'] != null}');
+        debugPrint('   Locations exists: ${data['locations'] != null}');
       }
       
       _updateMapMarkers(data);
