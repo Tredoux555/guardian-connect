@@ -4,14 +4,522 @@ import '../providers/auth_provider.dart';
 import '../providers/emergency_provider.dart';
 import '../models/emergency.dart';
 import '../services/api_service.dart';
+import '../services/socket_service.dart';
+import '../services/emergency_service.dart';
 import 'emergency_active_screen.dart';
+import 'emergency_response_screen.dart';
+import 'settings_screen.dart';
+import 'auth/login_screen.dart';
 import 'dart:convert';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  bool _hasInitialized = false; // Add flag to prevent multiple initializations
+  
+  List<Map<String, dynamic>> _pendingEmergencies = [];
+  bool _isCheckingPending = false;
+  int _pollCount = 0;
+  Set<String> _seenEmergencyIds = {};
+  bool _hasNavigatedToEmergency = false;
+  bool _isCreatingEmergency = false; // Prevent double emergency creation
+
+  @override
+  void initState() {
+    super.initState();
+    // Delay initialization to ensure widget is fully mounted
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_hasInitialized) {
+        _hasInitialized = true;
+        _setupSocketListener();
+        _checkActiveEmergency();
+        _checkPendingEmergencies();
+        // Start aggressive polling for emergencies
+        _startPendingEmergencyPolling();
+      }
+    });
+  }
+
+  // Refresh active emergency check when returning to this screen
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reset navigation flag when returning to this screen
+    _hasNavigatedToEmergency = false;
+    // Only refresh emergency check, don't re-setup socket listener
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkActiveEmergency();
+      _checkPendingEmergencies();
+    });
+  }
+
+  void _startPendingEmergencyPolling() {
+    // Aggressive polling: 3 seconds for first 20 polls (1 minute), then every 8 seconds
+    final pollInterval = _pollCount < 20 ? 3 : 8;
+    _pollCount++;
+    
+    Future.delayed(Duration(seconds: pollInterval), () {
+      if (mounted) {
+        _checkPendingEmergencies();
+        _startPendingEmergencyPolling();
+      }
+    });
+  }
+
+  Future<void> _checkPendingEmergencies() async {
+    if (_isCheckingPending) {
+      return;
+    }
+    
+    _isCheckingPending = true;
+    try {
+      final response = await ApiService.get('/emergencies/pending');
+      if (response.statusCode == 200 && mounted) {
+        final data = jsonDecode(response.body);
+        if (data is List) {
+          final newPending = List<Map<String, dynamic>>.from(data);
+          
+          // Check for NEW emergencies we haven't seen before
+          for (final emergency in newPending) {
+            final emergencyId = emergency['id'] as String?;
+            if (emergencyId != null && !_seenEmergencyIds.contains(emergencyId)) {
+              _seenEmergencyIds.add(emergencyId);
+              debugPrint('🚨🚨🚨 NEW EMERGENCY DETECTED: $emergencyId');
+              
+              // Auto-navigate to the first new emergency
+              if (!_hasNavigatedToEmergency && mounted) {
+                _hasNavigatedToEmergency = true;
+                _showEmergencyAlert(emergency);
+              }
+            }
+          }
+          
+          setState(() {
+            _pendingEmergencies = newPending;
+          });
+          
+          if (_pendingEmergencies.isNotEmpty) {
+            debugPrint('📢 Found ${_pendingEmergencies.length} pending emergency(ies)');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Could not check pending emergencies: $e');
+    } finally {
+      _isCheckingPending = false;
+    }
+  }
+
+  void _showEmergencyAlert(Map<String, dynamic> emergency) {
+    final emergencyId = emergency['id'] as String;
+    final senderName = (emergency['sender_display_name'] as String?) ?? 
+                       (emergency['sender_email'] as String?) ?? 
+                       'Someone';
+    
+    // Show a prominent dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: Colors.red.shade50,
+        title: Row(
+          children: [
+            Icon(Icons.warning, color: Colors.red.shade700, size: 32),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'EMERGENCY ALERT!',
+                style: TextStyle(
+                  color: Colors.red.shade700,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$senderName needs help!',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Your emergency contact has triggered an alert and needs your assistance.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              _hasNavigatedToEmergency = false; // Allow showing again later
+            },
+            child: const Text('Dismiss'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => EmergencyResponseScreen(
+                    emergencyId: emergencyId,
+                    senderName: senderName,
+                  ),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            child: const Text('RESPOND NOW'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _isCheckingEmergency = false; // Prevent duplicate simultaneous checks
+  
+  /// Safe provider access helper - checks context.mounted before accessing provider
+  EmergencyProvider? _getEmergencyProviderSafely() {
+    if (!mounted) {
+      debugPrint('⚠️ Widget not mounted, cannot access EmergencyProvider');
+      return null;
+    }
+    return Provider.of<EmergencyProvider>(context, listen: false);
+  }
+  
+  Future<void> _checkActiveEmergency() async {
+    // Prevent duplicate simultaneous requests
+    if (_isCheckingEmergency) {
+      debugPrint('⚠️ Emergency check already in progress, skipping...');
+      return;
+    }
+    
+    _isCheckingEmergency = true;
+    try {
+      final response = await ApiService.get('/emergencies/active');
+      
+      // Use safe provider access
+      final emergencyProvider = _getEmergencyProviderSafely();
+      if (emergencyProvider == null) {
+        debugPrint('⚠️ Cannot access provider, widget may be disposed');
+        return;
+      }
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['emergency'] != null && mounted) {
+          final emergency = data['emergency'];
+          emergencyProvider.setActiveEmergency(Emergency(
+            id: emergency['id'] as String,
+            userId: emergency['user_id'] as String,
+            createdAt: DateTime.parse(emergency['created_at'] as String),
+            status: emergency['status'] as String,
+          ));
+        } else if (mounted) {
+          // No active emergency - clear the provider
+          emergencyProvider.clearEmergency();
+        }
+      } else if (mounted) {
+        // No active emergency (404 or other status) - clear the provider
+        emergencyProvider.clearEmergency();
+      }
+    } catch (e) {
+      debugPrint('Could not check active emergency: $e');
+      // If we get a 404 or similar, clear the emergency provider
+      final emergencyProvider = _getEmergencyProviderSafely();
+      if (emergencyProvider != null) {
+        emergencyProvider.clearEmergency();
+      }
+    } finally {
+      _isCheckingEmergency = false;
+    }
+  }
+
+  void _setupSocketListener() async {
+    try {
+      // Connect to socket (won't block if it fails)
+      final socket = await SocketService.connect();
+      if (socket == null) {
+        debugPrint('⚠️ Socket connection failed - emergency alerts may not work in real-time');
+        // Continue - app still works without sockets for basic functionality
+      }
+
+      // Listen for incoming emergency alerts
+      SocketService.on('emergency_created', (data) async {
+        if (!mounted) return;
+        
+        // Get current user to check if we're the sender
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        String? currentUserId;
+        
+        try {
+          final userData = await ApiService.getCurrentUser();
+          currentUserId = userData['id'] as String?;
+        } catch (e) {
+          debugPrint('Could not get current user: $e');
+          // Continue without user ID check - will show all emergencies
+        }
+        
+        // Check if we're the sender - don't show our own emergency
+        final senderUserId = data['userId'] as String?;
+        if (currentUserId != null && 
+            senderUserId != null && 
+            currentUserId == senderUserId) {
+          debugPrint('⚠️ User is the sender - skipping emergency alert');
+          return;
+        }
+        
+        final emergencyId = data['emergencyId'] as String?;
+        final senderName = data['senderName'] as String? ?? 
+                          data['userEmail'] as String? ?? 
+                          'Someone';
+        
+        if (emergencyId != null && mounted) {
+          // Navigate to emergency response screen
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => EmergencyResponseScreen(
+                emergencyId: emergencyId,
+                senderName: senderName,
+              ),
+            ),
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('⚠️ Error setting up socket listener, emergency alerts may not work: $e');
+      // Continue - app still works without sockets
+    }
+  }
+
+  Future<void> _triggerEmergency(BuildContext context) async {
+    // Prevent double emergency creation
+    if (_isCreatingEmergency) {
+      debugPrint('⚠️ Emergency creation already in progress, ignoring request');
+      return;
+    }
+    
+    // Set flag to prevent double creation
+    _isCreatingEmergency = true;
+    
+    // Store the navigator reference BEFORE showing dialog
+    final navigator = Navigator.of(context);
+    BuildContext? dialogContext;
+    
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogBuildContext) {
+          dialogContext = dialogBuildContext;
+          return const Center(
+            child: CircularProgressIndicator(),
+          );
+        },
+      );
+
+      // Get emergency location using service
+      final position = await EmergencyService.getEmergencyLocation();
+      if (position == null) {
+        if (context.mounted) {
+          try {
+            Navigator.of(context, rootNavigator: true).pop(); // Close loading
+          } catch (e) {
+            debugPrint('⚠️ Error closing dialog: $e');
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not get your location. Please try again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Create emergency using service (handles location sharing with retry)
+      final result = await EmergencyService.createEmergency(
+        position: position,
+        locationRetries: 2,
+      );
+
+      // Handle existing emergency case
+      if (!result.success && result.existingEmergencyId != null) {
+        final existingEmergencyId = result.existingEmergencyId!;
+        debugPrint('⚠️ Active emergency exists: $existingEmergencyId');
+        
+        // Update emergency provider - use safe access
+        if (context.mounted) {
+          final emergencyProvider = _getEmergencyProviderSafely();
+          if (emergencyProvider != null) {
+            emergencyProvider.setActiveEmergency(Emergency(
+              id: existingEmergencyId,
+              userId: '',
+              createdAt: DateTime.now(),
+              status: 'active',
+            ));
+          }
+        }
+        
+        // Navigate to existing emergency instead
+        if (context.mounted) {
+          try {
+            Navigator.of(context, rootNavigator: true).pop(); // Close loading
+          } catch (e) {
+            debugPrint('⚠️ Error closing dialog: $e');
+          }
+          // Show info message
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('You already have an active emergency'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 2),
+            ),
+          );
+          Navigator.of(context, rootNavigator: true).push(
+            MaterialPageRoute(
+              builder: (context) => EmergencyActiveScreen(emergencyId: existingEmergencyId),
+            ),
+          );
+        }
+        return;
+      }
+
+      // Handle creation failure
+      if (!result.success || result.emergency == null) {
+        if (context.mounted) {
+          try {
+            Navigator.of(context, rootNavigator: true).pop(); // Close loading
+          } catch (e) {
+            debugPrint('⚠️ Error closing dialog: $e');
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result.errorMessage ?? 'Failed to create emergency'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      final emergency = result.emergency!;
+      debugPrint('✅ Emergency created successfully: ${emergency.id}');
+      if (!result.locationShared) {
+        debugPrint('⚠️ Location sharing failed, but emergency was created');
+      }
+
+      // Update emergency provider - use safe access
+      if (context.mounted) {
+        final emergencyProvider = _getEmergencyProviderSafely();
+        if (emergencyProvider != null) {
+          emergencyProvider.setActiveEmergency(emergency);
+          debugPrint('✅ Emergency provider updated successfully');
+        } else {
+          debugPrint('⚠️ Could not access provider, but emergency was created: ${emergency.id}');
+        }
+      }
+      
+      // CRITICAL: Close loading dialog BEFORE navigation
+      // Use rootNavigator to ensure we can close the dialog even if context changes
+      if (context.mounted) {
+        debugPrint('🔄 Closing loading dialog...');
+        try {
+          // Try to close using dialog context first
+          if (dialogContext != null && dialogContext!.mounted) {
+            Navigator.of(dialogContext!, rootNavigator: true).pop();
+          } else {
+            // Fallback: use root navigator
+            Navigator.of(context, rootNavigator: true).pop();
+          }
+          debugPrint('✅ Loading dialog closed');
+        } catch (e) {
+          debugPrint('⚠️ Error closing dialog (continuing anyway): $e');
+        }
+        
+        // Small delay to ensure dialog is fully dismissed
+        await Future.delayed(const Duration(milliseconds: 200));
+        
+        // Navigate to active emergency screen - use rootNavigator to ensure it works
+        if (context.mounted) {
+          debugPrint('🚀 Navigating to EmergencyActiveScreen with ID: ${emergency.id}');
+          Navigator.of(context, rootNavigator: true).push(
+            MaterialPageRoute(
+              builder: (context) => EmergencyActiveScreen(emergencyId: emergency.id),
+            ),
+          );
+          debugPrint('✅ Navigation complete');
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error triggering emergency: $e');
+      // Don't use context.mounted here - widget might be disposed
+      // Just try to close dialog safely
+      try {
+        if (dialogContext != null && dialogContext!.mounted) {
+          Navigator.of(dialogContext!, rootNavigator: true).pop();
+        } else if (navigator.canPop()) {
+          navigator.pop();
+        }
+      } catch (popError) {
+        debugPrint('⚠️ Error closing dialog: $popError');
+      }
+      
+      // Only use context if we're sure it's safe
+      final safeContext = context;
+      if (safeContext.mounted) {
+        ScaffoldMessenger.of(safeContext).showSnackBar(
+          SnackBar(
+            content: Text('Failed to create emergency: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      // Always reset the flag, even if there was an error
+      _isCreatingEmergency = false;
+      debugPrint('✅ Emergency creation flag reset');
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Calculate exact position to match splash screen spacing
+    // Splash screen calculates: totalTopHeight + 40 + textHeight + 30 = icon position
+    // Then text is 30px below icon
+    // For home screen, we reverse: text where icon is, icon where text is
+    final statusBarHeight = MediaQuery.of(context).padding.top;
+    final appBarHeight = AppBar().preferredSize.height;
+    final totalTopHeight = statusBarHeight + appBarHeight;
+    
+    // Match splash screen spacing exactly:
+    // - Top padding (AppBar + status bar)
+    // - SizedBox(height: 40)
+    // - Text height (fontSize 32, approximate ~40px with line height)
+    // - SizedBox(height: 30) - spacing between text and icon
+    const topSpacing = 40.0;
+    const textHeight = 40.0; // Approximate text height (fontSize 32)
+    const spacingBetweenTextAndIcon = 30.0;
+    
+    // Calculate where text should be positioned (same as splash screen icon position)
+    final textTopPosition = totalTopHeight + topSpacing;
+    // Calculate where icon should be positioned (30px below text, matching splash screen spacing)
+    final iconTopPosition = textTopPosition + textHeight + spacingBetweenTextAndIcon;
+    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Guardian Connect'),
@@ -19,61 +527,163 @@ class HomeScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
-              // TODO: Navigate to settings
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const SettingsScreen(),
+                ),
+              );
             },
           ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
-              final authProvider = Provider.of<AuthProvider>(context, listen: false);
-              await authProvider.logout();
-              if (context.mounted) {
-                Navigator.of(context).pushReplacementNamed('/login');
+              try {
+                final authProvider = Provider.of<AuthProvider>(context, listen: false);
+                await authProvider.logout();
+                
+                if (context.mounted) {
+                  // Use pushAndRemoveUntil to clear navigation stack and go to login
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (context) => const LoginScreen()),
+                    (route) => false, // Remove all previous routes
+                  );
+                }
+              } catch (e) {
+                debugPrint('Logout error: $e');
+                // Even if logout fails, clear tokens and navigate
+                await ApiService.clearTokens();
+                if (context.mounted) {
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (context) => const LoginScreen()),
+                    (route) => false,
+                  );
+                }
               }
             },
           ),
         ],
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'Emergency Alert',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
+      body: Stack(
+        children: [
+          // Position text at calculated position (matching splash screen spacing)
+          Positioned(
+            top: textTopPosition,
+            left: 0,
+            right: 0,
+            child: const Center(
+              child: Text(
+                'Emergency Alert',
+                style: TextStyle(
+                  fontSize: 32, // Match splash screen text size
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
-            const SizedBox(height: 48),
-            Consumer<EmergencyProvider>(
-              builder: (context, emergencyProvider, _) {
-                if (emergencyProvider.activeEmergency != null) {
-                  return ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => EmergencyActiveScreen(
-                            emergencyId: emergencyProvider.activeEmergency!.id,
+          ),
+          // Position icon/button at calculated position (matching splash screen)
+          Positioned(
+            top: iconTopPosition,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Column(
+                children: [
+                  // Show pending emergencies if any (above button)
+                  if (_pendingEmergencies.isNotEmpty) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        border: Border.all(color: Colors.orange, width: 2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '⚠️ Pending Emergency Alerts',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange,
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 10),
+                          ..._pendingEmergencies.map((emergency) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (context) => EmergencyResponseScreen(
+                                        emergencyId: emergency['id'] as String,
+                                        senderName: (emergency['sender_display_name'] as String?) ?? 
+                                                    (emergency['sender_email'] as String?) ?? 
+                                                    'Someone',
+                                      ),
+                                    ),
+                                  );
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.orange,
+                                  minimumSize: const Size(double.infinity, 50),
+                                ),
+                                child: Text(
+                                  'Respond to ${emergency['sender_display_name'] ?? emergency['sender_email'] ?? 'Emergency'}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                                ),
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ],
+                  // Emergency button - same size as splash screen icon (200x200 container, 100px icon)
+                  Consumer<EmergencyProvider>(
+                    builder: (context, emergencyProvider, _) {
+                      if (emergencyProvider.activeEmergency != null) {
+                        return ElevatedButton(
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => EmergencyActiveScreen(
+                                  emergencyId: emergencyProvider.activeEmergency!.id,
+                                ),
+                              ),
+                            );
+                          },
+                          child: const Text('View Active Emergency'),
+                        );
+                      }
+                      
+                      return _EmergencyButton(
+                        isCreatingEmergency: _isCreatingEmergency,
+                        onTriggerEmergency: _triggerEmergency,
                       );
                     },
-                    child: const Text('View Active Emergency'),
-                  );
-                }
-                
-                return _EmergencyButton();
-              },
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _EmergencyButton extends StatefulWidget {
+  final bool isCreatingEmergency;
+  final Future<void> Function(BuildContext) onTriggerEmergency;
+  
+  const _EmergencyButton({
+    required this.isCreatingEmergency,
+    required this.onTriggerEmergency,
+  });
+  
   @override
   State<_EmergencyButton> createState() => _EmergencyButtonState();
 }
@@ -99,8 +709,7 @@ class _EmergencyButtonState extends State<_EmergencyButton> {
           _isPressed = false;
         });
       },
-      onLongPress: () {
-        // TODO: Trigger emergency after hold confirmation
+      onLongPress: widget.isCreatingEmergency ? null : () {
         _showEmergencyConfirmation(context);
       },
       child: AnimatedContainer(
@@ -108,11 +717,15 @@ class _EmergencyButtonState extends State<_EmergencyButton> {
         width: 200,
         height: 200,
         decoration: BoxDecoration(
-          color: _isPressed ? Colors.red.shade700 : const Color(0xFFE53935),
+          color: widget.isCreatingEmergency 
+              ? Colors.grey 
+              : (_isPressed ? Colors.red.shade700 : const Color(0xFFE53935)),
           shape: BoxShape.circle,
           boxShadow: [
             BoxShadow(
-              color: Colors.red.withOpacity(0.3),
+              color: widget.isCreatingEmergency 
+                  ? Colors.grey.withOpacity(0.3)
+                  : Colors.red.withOpacity(0.3),
               blurRadius: 20,
               spreadRadius: 5,
             ),
@@ -141,7 +754,7 @@ class _EmergencyButtonState extends State<_EmergencyButton> {
           ElevatedButton(
             onPressed: () async {
               Navigator.of(context).pop();
-              await _triggerEmergency(context);
+              await widget.onTriggerEmergency(context);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,

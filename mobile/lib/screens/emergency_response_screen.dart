@@ -78,15 +78,23 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
   }
 
   void _startLocationSharing() {
-    // Start periodic location updates
-    LocationService.getLocationStream().listen((position) async {
+    // Start emergency location stream for maximum GPS accuracy
+    LocationService.getEmergencyLocationStream().listen((position) async {
       try {
+        // Log GPS quality
+        if (LocationService.isGPSQuality(position)) {
+          print('✅ GPS-quality location: ${position.accuracy.toStringAsFixed(1)}m accuracy');
+        } else {
+          print('⚠️ Location accuracy: ${position.accuracy.toStringAsFixed(1)}m');
+        }
+        
         await ApiService.post('/emergencies/${widget.emergencyId}/location', {
           'latitude': position.latitude,
           'longitude': position.longitude,
+          'accuracy': position.accuracy, // Include accuracy for backend validation
         });
       } catch (e) {
-        print('Error updating location: $e');
+        print('❌ Error updating location: $e');
       }
     });
   }

@@ -52,9 +52,10 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
 
     // Request location permissions
     await LocationService.requestPermissions();
-    _currentPosition = await LocationService.getCurrentLocation();
+    // Use emergency location for maximum GPS accuracy
+    _currentPosition = await LocationService.getEmergencyLocation();
 
-    // Start location tracking
+    // Start location tracking with emergency accuracy
     _startLocationTracking();
 
     // Load initial emergency data
@@ -62,26 +63,51 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
   }
 
   void _startLocationTracking() {
-    // Update location every 5 seconds
-    _locationUpdateTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
-      final position = await LocationService.getCurrentLocation();
-      if (position != null && mounted) {
-        setState(() {
-          _currentPosition = position;
-        });
-        _updateMyLocation(position);
-      }
-    });
+    // Use emergency location stream for maximum GPS accuracy
+    _locationSubscription = LocationService.getEmergencyLocationStream().listen(
+      (position) {
+        if (mounted) {
+          // Log GPS quality
+          if (LocationService.isGPSQuality(position)) {
+            print('✅ GPS-quality location: ${position.accuracy.toStringAsFixed(1)}m accuracy');
+          } else {
+            print('⚠️ Location accuracy: ${position.accuracy.toStringAsFixed(1)}m (may not be GPS)');
+          }
+          
+          setState(() {
+            _currentPosition = position;
+          });
+          _updateMyLocation(position);
+        }
+      },
+      onError: (error) {
+        print('❌ Location stream error: $error');
+      },
+    );
   }
 
   Future<void> _updateMyLocation(Position position) async {
     try {
-      await ApiService.post('/emergencies/${widget.emergencyId}/location', {
-        'latitude': position.latitude,
-        'longitude': position.longitude,
-      });
+      // Only send if accuracy is GPS-quality (≤20m)
+      // This ensures we're using GPS, not WiFi/cell tower triangulation
+      if (LocationService.isGPSQuality(position)) {
+        print('✅ Sending GPS-quality location: ${position.accuracy.toStringAsFixed(1)}m');
+        await ApiService.post('/emergencies/${widget.emergencyId}/location', {
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'accuracy': position.accuracy, // Include accuracy for backend validation
+        });
+      } else {
+        // Still send, but log warning
+        print('⚠️ Sending location with lower accuracy: ${position.accuracy.toStringAsFixed(1)}m');
+        await ApiService.post('/emergencies/${widget.emergencyId}/location', {
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'accuracy': position.accuracy,
+        });
+      }
     } catch (e) {
-      print('Error updating location: $e');
+      print('❌ Error updating location: $e');
     }
   }
 
