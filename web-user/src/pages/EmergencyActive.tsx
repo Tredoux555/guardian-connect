@@ -65,6 +65,7 @@ function EmergencyActive() {
   const locationSharedRef = useRef(false)
   const [googleMapsUrl, setGoogleMapsUrl] = useState<string | null>(null)
   const [googleMapsUrlLoading, setGoogleMapsUrlLoading] = useState(false)
+  const [manualLocationSharing, setManualLocationSharing] = useState(false)
 
   // Helper function to refresh Eruda console after important logs
   const refreshErudaConsole = useCallback(() => {
@@ -254,15 +255,41 @@ function EmergencyActive() {
       
       navigator.geolocation.getCurrentPosition(
         async (position) => {
+          const lat = position.coords.latitude
+          const lng = position.coords.longitude
+          const accuracy = position.coords.accuracy
+          
+          // Check for fallback/invalid locations
+          const isSanFranciscoFallback = 
+            (Math.abs(lat - 37.785834) < 0.0001 && Math.abs(lng - (-122.406417)) < 0.0001) ||
+            (Math.abs(lat - 37.7858) < 0.001 && Math.abs(lng - (-122.4064)) < 0.001)
+          
+          const isNullIslandFallback = Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001
+          
+          if (isSanFranciscoFallback || isNullIslandFallback) {
+            console.error('❌ LOCATION REJECTED: Browser returned fallback coordinates', {
+              latitude: lat,
+              longitude: lng,
+              accuracy: accuracy,
+              reason: isSanFranciscoFallback ? 'San Francisco fallback' : 'Null Island',
+              userId: currentUserId,
+              isSender: senderCheck
+            })
+            // Don't send fallback locations - they're worse than no location
+            return
+          }
+          
           try {
             await api.post(`/emergencies/${id}/location`, {
-              latitude: position.coords.latitude,
-              longitude: position.coords.longitude,
+              latitude: lat,
+              longitude: lng,
+              accuracy: accuracy,
             })
             // Always log location sharing (critical for debugging)
             console.log('✅ Location shared once:', {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
+              lat: lat,
+              lng: lng,
+              accuracy: accuracy,
               userId: currentUserId,
               emergencyId: id,
               isSender: senderCheck
@@ -1028,6 +1055,102 @@ function EmergencyActive() {
   }
 
   /**
+   * Manually share location when automatic sharing fails
+   */
+  const shareLocationManually = async () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported in this browser.')
+      return
+    }
+
+    setManualLocationSharing(true)
+
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Location request timed out')), 15000)
+
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            clearTimeout(timeout)
+            resolve(pos)
+          },
+          (error) => {
+            clearTimeout(timeout)
+            reject(error)
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 30000 // Accept locations up to 30 seconds old
+          }
+        )
+      })
+
+      const lat = position.coords.latitude
+      const lng = position.coords.longitude
+      const accuracy = position.coords.accuracy
+      
+      // Check for fallback/invalid locations
+      const isSanFranciscoFallback = 
+        (Math.abs(lat - 37.785834) < 0.0001 && Math.abs(lng - (-122.406417)) < 0.0001) ||
+        (Math.abs(lat - 37.7858) < 0.001 && Math.abs(lng - (-122.4064)) < 0.001)
+      
+      const isNullIslandFallback = Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001
+      
+      if (isSanFranciscoFallback || isNullIslandFallback) {
+        console.error('❌ LOCATION REJECTED: Browser returned fallback coordinates', {
+          latitude: lat,
+          longitude: lng,
+          accuracy: accuracy,
+          reason: isSanFranciscoFallback ? 'San Francisco fallback' : 'Null Island'
+        })
+        alert('⚠️ Location Error\n\nYour browser returned a default location (San Francisco), not your real location.\n\nThis usually happens on desktop computers or when using a VPN.\n\nFor accurate location:\n• Use a mobile device with GPS\n• Disable VPN if possible\n• Try a different browser')
+        return
+      }
+      
+      // Warn about low accuracy
+      if (accuracy && accuracy > 2000) {
+        console.warn('⚠️ Low accuracy location:', { lat, lng, accuracy })
+        const proceed = confirm(`⚠️ Low Location Accuracy\n\nYour location accuracy is ${Math.round(accuracy)}m, which may be IP-based rather than GPS.\n\nDo you want to share this location anyway?`)
+        if (!proceed) return
+      }
+
+      // Share location with backend
+      await api.post(`/emergencies/${id}/location`, {
+        latitude: lat,
+        longitude: lng,
+        accuracy: accuracy,
+      })
+
+      console.log('✅ Location shared manually:', {
+        lat: lat,
+        lng: lng,
+        accuracy: accuracy
+      })
+
+      alert('✅ Location shared successfully!')
+
+      // Refresh locations to show the new one
+      loadEmergency()
+
+    } catch (error: any) {
+      console.error('❌ Manual location sharing failed:', error)
+
+      if (error.code === 1) {
+        alert('Location permission denied. Please allow location access and try again.')
+      } else if (error.code === 2) {
+        alert('Location unavailable. Please check your GPS and try again.')
+      } else if (error.code === 3) {
+        alert('Location request timed out. Please try again.')
+      } else {
+        alert('Failed to share location. Please try again.')
+      }
+    } finally {
+      setManualLocationSharing(false)
+    }
+  }
+
+  /**
    * End the emergency
    * Only the emergency creator can end an emergency
    */
@@ -1264,18 +1387,35 @@ function EmergencyActive() {
     // If no sender location yet, show message
     if (!senderLoc) {
       return (
-        <div style={{ 
-          padding: '1rem', 
+        <div style={{
+          padding: '1rem',
           backgroundColor: '#D4E8F5', /* Lighter medium baby blue - replaces yellow */
-          borderRadius: '8px', 
+          borderRadius: '8px',
           margin: '1rem 0',
           textAlign: 'center',
           color: '#4A6FA5' /* Darker blue text for contrast */
         }}>
           <p style={{ margin: 0, marginBottom: '0.5rem' }}>⏳ Waiting for emergency location data...</p>
-          <p style={{ margin: 0, fontSize: '0.85rem', color: '#666' }}>
-            The sender needs to share their location. If they're on HTTP, they should use the "Share Location" button.
+          <p style={{ margin: 0, marginBottom: '1rem', fontSize: '0.85rem', color: '#666' }}>
+            The sender needs to share their location. If automatic sharing failed, use the button below.
           </p>
+          <button
+            onClick={shareLocationManually}
+            disabled={manualLocationSharing}
+            style={{
+              padding: '0.75rem 1.5rem',
+              backgroundColor: manualLocationSharing ? '#ccc' : '#4A90E2',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '1rem',
+              fontWeight: 'bold',
+              cursor: manualLocationSharing ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            {manualLocationSharing ? '📍 Sharing Location...' : '📍 Share My Location'}
+          </button>
         </div>
       )
     }

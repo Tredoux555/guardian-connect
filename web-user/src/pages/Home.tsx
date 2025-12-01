@@ -237,6 +237,7 @@ function Home() {
               // STEP 1: Log exact GPS coordinates from device (BEFORE any processing)
               const deviceLat = position.coords.latitude
               const deviceLng = position.coords.longitude
+              const accuracy = position.coords.accuracy
               console.log('🔍 [COORDINATE TRACE] Step 1 - Device GPS:', {
                 latitude: deviceLat,
                 longitude: deviceLng,
@@ -244,18 +245,52 @@ function Home() {
                 longitudeType: typeof deviceLng,
                 latitudeString: String(deviceLat),
                 longitudeString: String(deviceLng),
-                accuracy: position.coords.accuracy,
+                accuracy: accuracy,
                 altitude: position.coords.altitude,
                 heading: position.coords.heading,
                 speed: position.coords.speed,
                 timestamp: new Date(position.timestamp).toISOString()
               })
               
+              // Check for fallback/invalid locations
+              const isSanFranciscoFallback = 
+                (Math.abs(deviceLat - 37.785834) < 0.0001 && Math.abs(deviceLng - (-122.406417)) < 0.0001) ||
+                (Math.abs(deviceLat - 37.7858) < 0.001 && Math.abs(deviceLng - (-122.4064)) < 0.001)
+              
+              const isNullIslandFallback = Math.abs(deviceLat) < 0.001 && Math.abs(deviceLng) < 0.001
+              
+              // IP-based locations typically have accuracy > 1000m
+              const isLowAccuracy = accuracy && accuracy > 2000
+              
+              if (isSanFranciscoFallback || isNullIslandFallback) {
+                console.error('❌ LOCATION REJECTED: Browser returned fallback coordinates (IP-based location)', {
+                  latitude: deviceLat,
+                  longitude: deviceLng,
+                  reason: isSanFranciscoFallback ? 'San Francisco fallback' : 'Null Island',
+                  suggestion: 'Use mobile device with GPS for accurate location'
+                })
+                alert('⚠️ Location Error\n\nYour browser returned a default location (not your real location). This usually happens on desktop computers or when using a VPN.\n\nFor accurate emergency location:\n• Use a mobile device with GPS\n• Disable VPN if possible\n• Or share your location manually on the emergency screen')
+                resolve() // Continue to emergency screen where they can share manually
+                return
+              }
+              
+              if (isLowAccuracy) {
+                console.warn('⚠️ Low accuracy location detected:', {
+                  accuracy: accuracy,
+                  latitude: deviceLat,
+                  longitude: deviceLng,
+                  reason: 'IP-based geolocation (no GPS)'
+                })
+                // Still send it but warn the user
+                alert('⚠️ Location Warning\n\nYour location accuracy is low (' + Math.round(accuracy) + 'm). This may be IP-based location rather than GPS.\n\nFor better accuracy:\n• Use a mobile device with GPS\n• Enable location services')
+              }
+              
               try {
                 // STEP 2: Log what we're sending to backend
                 console.log('🔍 [COORDINATE TRACE] Step 2 - Sending to backend:', {
                   latitude: deviceLat,
                   longitude: deviceLng,
+                  accuracy: accuracy,
                   latitudeType: typeof deviceLat,
                   longitudeType: typeof deviceLng,
                   emergencyId: emergencyId
@@ -264,6 +299,7 @@ function Home() {
                 const locationResponse = await api.post(`/emergencies/${emergencyId}/location`, {
                   latitude: deviceLat,
                   longitude: deviceLng,
+                  accuracy: accuracy, // Send accuracy to backend for logging
                 })
                 
                 // STEP 3: Log backend response

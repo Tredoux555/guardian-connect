@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../services/location_service.dart';
@@ -27,6 +28,11 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
   Timer? _locationUpdateTimer;
   String? _mapError;
   bool _mapInitialized = false;
+  bool _hasNavigatedAway = false; // Guard to prevent multiple navigation attempts
+  int _locationLoadRetryCount = 0; // Track retry attempts for location loading
+  static const int _maxLocationRetries = 3; // Maximum retries for loading location data
+  MapType _mapType = MapType.normal; // Map type (normal or satellite)
+  String? _currentUserId; // Store current user ID to check if sender
 
   @override
   void initState() {
@@ -36,6 +42,15 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
 
   Future<void> _initializeEmergency() async {
     debugPrint('📍 Starting emergency initialization...');
+    
+    // Get current user ID to check if we're the sender
+    try {
+      final userData = await ApiService.getCurrentUser();
+      _currentUserId = userData['id'] as String?;
+      debugPrint('👤 Current user ID: $_currentUserId');
+    } catch (e) {
+      debugPrint('⚠️ Could not get current user ID: $e');
+    }
     
     // Request location permissions first (most important)
     await LocationService.requestPermissions();
@@ -84,14 +99,34 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
 
       // Set up socket listeners
       SocketService.on('participant_accepted', (data) {
-        _loadEmergencyData();
+        if (mounted && !_hasNavigatedAway) {
+          _loadEmergencyData();
+        }
       });
 
       SocketService.on('location_update', (data) {
-        _updateLocationMarker(data);
+        if (mounted && !_hasNavigatedAway) {
+          _updateLocationMarker(data);
+        }
       });
 
-      SocketService.on('emergency_ended', (_) {
+      // Add emergency ID validation to prevent incorrect navigation
+      SocketService.on('emergency_ended', (data) {
+        if (!mounted || _hasNavigatedAway) return;
+        
+        // Validate that this event is for the current emergency
+        final eventEmergencyId = data is Map ? data['emergencyId'] as String? : null;
+        if (eventEmergencyId != null && eventEmergencyId != widget.emergencyId) {
+          debugPrint('⚠️ emergency_ended event received for different emergency: $eventEmergencyId (current: ${widget.emergencyId}) - ignoring');
+          return;
+        }
+        
+        debugPrint('🛑 emergency_ended event received for current emergency: ${widget.emergencyId}');
+        debugPrint('   Navigating away from EmergencyActiveScreen');
+        
+        // Set flag to prevent multiple navigation attempts
+        _hasNavigatedAway = true;
+        
         if (mounted) {
           Navigator.of(context).pop();
         }
@@ -171,7 +206,22 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
         debugPrint('🔍 DEBUG: Locations array:');
         for (var i = 0; i < (data['locations'] as List).length; i++) {
           final loc = data['locations'][i];
-          debugPrint('   Location $i: user_id=${loc['user_id']}, lat=${loc['latitude']}, lng=${loc['longitude']}');
+          final timestamp = loc['timestamp'] as String?;
+          final lat = loc['latitude'];
+          final lng = loc['longitude'];
+          final userId = loc['user_id'];
+          debugPrint('   Location $i: user_id=$userId, lat=$lat, lng=$lng, timestamp=$timestamp');
+          
+          // Validate coordinates
+          try {
+            final latNum = double.parse(lat.toString());
+            final lngNum = double.parse(lng.toString());
+            if (latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
+              debugPrint('      ⚠️ WARNING: Invalid coordinates for location $i');
+            }
+          } catch (e) {
+            debugPrint('      ⚠️ WARNING: Could not parse coordinates for location $i: $e');
+          }
         }
       }
       
@@ -187,17 +237,85 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
             final locationsList = data['locations'] as List;
             debugPrint('🔍 DEBUG: Searching through ${locationsList.length} locations for sender: $senderUserId');
             
-            final senderLocation = locationsList.firstWhere(
-              (loc) => loc['user_id'] == senderUserId,
-              orElse: () => null,
-            );
+            // Normalize user_id for comparison (handle UUID format differences)
+            final normalizedSenderUserId = senderUserId.toString().trim().toLowerCase();
+            
+            // Find sender's location with normalized comparison
+            dynamic senderLocation;
+            try {
+              senderLocation = locationsList.firstWhere(
+                (loc) {
+                  final locUserId = loc['user_id']?.toString().trim().toLowerCase() ?? '';
+                  return locUserId == normalizedSenderUserId;
+                },
+                orElse: () => null,
+              );
+            } catch (e) {
+              debugPrint('⚠️ Error finding sender location with firstWhere: $e');
+              senderLocation = null;
+            }
+            
+            // Fallback: try direct comparison if normalized didn't work
+            if (senderLocation == null) {
+              debugPrint('🔄 Trying direct user_id comparison as fallback...');
+              try {
+                senderLocation = locationsList.firstWhere(
+                  (loc) => loc['user_id']?.toString() == senderUserId.toString(),
+                  orElse: () => null,
+                );
+              } catch (e) {
+                debugPrint('⚠️ Fallback comparison also failed: $e');
+              }
+            }
             
             if (senderLocation != null) {
-              _emergencyLocation = LatLng(
-                double.parse(senderLocation['latitude'].toString()),
-                double.parse(senderLocation['longitude'].toString()),
-              );
+              final lat = double.tryParse(senderLocation['latitude'].toString());
+              final lng = double.tryParse(senderLocation['longitude'].toString());
+              final timestamp = senderLocation['timestamp'] as String?;
+              
+              // Validate coordinates are reasonable
+              if (lat == null || lng == null) {
+                debugPrint('❌ Invalid coordinates in sender location: lat=$lat, lng=$lng');
+                throw Exception('Invalid coordinates');
+              }
+              
+              if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                debugPrint('❌ Coordinates out of valid range: lat=$lat, lng=$lng');
+                throw Exception('Coordinates out of valid range');
+              }
+              
+              // Check if location is recent (within last 24 hours) if timestamp is available
+              if (timestamp != null) {
+                try {
+                  final locationTime = DateTime.parse(timestamp);
+                  final now = DateTime.now();
+                  final age = now.difference(locationTime);
+                  if (age.inHours > 24) {
+                    debugPrint('⚠️ WARNING: Sender location is ${age.inHours} hours old (older than 24 hours)');
+                    debugPrint('   Location timestamp: $timestamp');
+                    // Still use it, but log warning
+                  } else {
+                    debugPrint('✅ Sender location is recent: ${age.inMinutes} minutes old');
+                  }
+                } catch (e) {
+                  debugPrint('⚠️ Could not parse timestamp: $timestamp, error: $e');
+                }
+              }
+              
+              // Validate coordinates are not default/test coordinates (0,0 or common test locations)
+              final isTestLocation = (lat == 0.0 && lng == 0.0) ||
+                  (lat == 37.785834 && lng == -122.406417); // San Francisco test coordinates
+              
+              if (isTestLocation) {
+                debugPrint('⚠️ WARNING: Sender location appears to be test/default coordinates: $lat, $lng');
+                debugPrint('   This may indicate incorrect location data');
+              }
+              
+              _emergencyLocation = LatLng(lat, lng);
               debugPrint('📍 Emergency location found: ${_emergencyLocation!.latitude}, ${_emergencyLocation!.longitude}');
+              
+              // Reset retry count on success
+              _locationLoadRetryCount = 0;
               
               // Center map on emergency location
               if (_mapController != null && mounted) {
@@ -210,21 +328,71 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
               }
             } else {
               debugPrint('❌ DEBUG: Sender location NOT found in locations array!');
-              debugPrint('❌ DEBUG: Available user_ids: ${locationsList.map((l) => l['user_id']).toList()}');
-              debugPrint('⚠️ WARNING: Sender location missing - map will not center correctly');
-              debugPrint('💡 This may happen if sender has not shared location yet - will retry...');
+              debugPrint('❌ DEBUG: Available user_ids: ${locationsList.map((l) => l['user_id']?.toString()).toList()}');
+              debugPrint('❌ DEBUG: Normalized sender user_id: $normalizedSenderUserId');
               
-              // Retry loading emergency data after a delay to get sender's location
-              Future.delayed(const Duration(seconds: 2), () {
-                if (mounted && _emergencyLocation == null) {
-                  debugPrint('🔄 Retrying to load sender location...');
-                  _loadEmergencyData();
+              // FALLBACK: If current user is the sender, use their current position
+              if (_currentUserId != null && 
+                  senderUserId != null && 
+                  _currentUserId.toString().trim().toLowerCase() == normalizedSenderUserId &&
+                  _currentPosition != null) {
+                debugPrint('💡 Current user is the sender - using current position as fallback');
+                _emergencyLocation = LatLng(
+                  _currentPosition!.latitude,
+                  _currentPosition!.longitude,
+                );
+                debugPrint('📍 Using sender\'s current position as emergency location: ${_emergencyLocation!.latitude}, ${_emergencyLocation!.longitude}');
+                
+                // Update state to show map
+                if (mounted) {
+                  setState(() {
+                    // Trigger rebuild to show map
+                  });
                 }
-              });
+                
+                // Center map on emergency location
+                if (_mapController != null && mounted) {
+                  _mapController!.animateCamera(
+                    CameraUpdate.newLatLng(_emergencyLocation!),
+                  );
+                  debugPrint('✅ Map centered on sender\'s current position');
+                }
+                
+                // Still try to load from API in background (will update when available)
+                if (_locationLoadRetryCount < _maxLocationRetries && mounted) {
+                  _locationLoadRetryCount++;
+                  final delaySeconds = 2 * _locationLoadRetryCount;
+                  debugPrint('🔄 Will retry loading sender location from API in ${delaySeconds}s...');
+                  Future.delayed(Duration(seconds: delaySeconds), () {
+                    if (mounted && !_hasNavigatedAway) {
+                      _loadEmergencyData();
+                    }
+                  });
+                }
+              } else {
+                debugPrint('⚠️ WARNING: Sender location missing - map will not center correctly');
+                debugPrint('💡 This may happen if sender has not shared location yet - will retry...');
+                
+                // Retry loading emergency data with exponential backoff
+                if (_locationLoadRetryCount < _maxLocationRetries && mounted && _emergencyLocation == null) {
+                  _locationLoadRetryCount++;
+                  final delaySeconds = 2 * _locationLoadRetryCount; // 2s, 4s, 6s
+                  debugPrint('🔄 Retrying to load sender location in ${delaySeconds}s... (attempt $_locationLoadRetryCount/$_maxLocationRetries)');
+                  Future.delayed(Duration(seconds: delaySeconds), () {
+                    if (mounted && _emergencyLocation == null && !_hasNavigatedAway) {
+                      _loadEmergencyData();
+                    }
+                  });
+                } else if (_locationLoadRetryCount >= _maxLocationRetries) {
+                  debugPrint('❌ Max retries reached for loading sender location');
+                  debugPrint('   Map will show without sender location marker');
+                }
+              }
             }
           } catch (e) {
             debugPrint('⚠️ Could not find sender location: $e');
             debugPrint('   Error type: ${e.runtimeType}');
+            debugPrint('   Stack trace: ${StackTrace.current}');
           }
         } else {
           debugPrint('❌ DEBUG: senderUserId is null!');
@@ -326,6 +494,12 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
   }
 
   Future<void> _endEmergency() async {
+    // Prevent multiple navigation attempts
+    if (_hasNavigatedAway) {
+      debugPrint('⚠️ Navigation already in progress, ignoring end emergency request');
+      return;
+    }
+    
     debugPrint('🛑 End emergency button pressed for: ${widget.emergencyId}');
     
     final confirmed = await showDialog<bool>(
@@ -355,31 +529,35 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
 
     debugPrint('🛑 Dialog result: $confirmed');
 
-    if (confirmed == true && mounted) {
+    if (confirmed == true && mounted && !_hasNavigatedAway) {
       try {
         debugPrint('📡 Sending end emergency request...');
         final response = await ApiService.post('/emergencies/${widget.emergencyId}/end', {});
         debugPrint('✅ End emergency response: ${response.statusCode}');
         
-      if (mounted) {
-        // Clear the active emergency from the provider
-        final emergencyProvider = Provider.of<EmergencyProvider>(context, listen: false);
-        emergencyProvider.clearEmergency();
-        debugPrint('✅ Cleared active emergency from provider');
-        
-        // Navigate back to home screen
-        Navigator.of(context).pop();
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Emergency ended successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+        if (mounted && !_hasNavigatedAway) {
+          // Set flag to prevent multiple navigation attempts
+          _hasNavigatedAway = true;
+          
+          // Clear the active emergency from the provider
+          final emergencyProvider = Provider.of<EmergencyProvider>(context, listen: false);
+          emergencyProvider.clearEmergency();
+          debugPrint('✅ Cleared active emergency from provider');
+          
+          debugPrint('🧭 Navigating back to home screen...');
+          // Navigate back to home screen
+          Navigator.of(context).pop();
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Emergency ended successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       } catch (e) {
         debugPrint('❌ Error ending emergency: $e');
-        if (mounted) {
+        if (mounted && !_hasNavigatedAway) {
           // Show user-friendly error message
           final errorMessage = e.toString().replaceFirst('Exception: ', '');
           ScaffoldMessenger.of(context).showSnackBar(
@@ -401,7 +579,48 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
         }
       }
     } else {
-      debugPrint('⚠️ End emergency not confirmed or widget not mounted');
+      debugPrint('⚠️ End emergency not confirmed, widget not mounted, or navigation already in progress');
+    }
+  }
+
+  Future<void> _openGoogleMapsDirections() async {
+    if (_emergencyLocation == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Emergency location not available yet'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    final lat = _emergencyLocation!.latitude;
+    final lng = _emergencyLocation!.longitude;
+    
+    // Create Google Maps directions URL
+    final url = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving'
+    );
+
+    try {
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+        debugPrint('✅ Opened Google Maps directions to: $lat, $lng');
+      } else {
+        throw Exception('Could not launch Google Maps');
+      }
+    } catch (e) {
+      debugPrint('❌ Error opening Google Maps: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not open Google Maps: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -538,6 +757,7 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
     _locationUpdateTimer?.cancel();
     _locationSubscription?.cancel();
     SocketService.leaveEmergency(widget.emergencyId);
+    _hasNavigatedAway = true; // Prevent any further navigation attempts
     super.dispose();
   }
 
@@ -604,12 +824,15 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                             target: _emergencyLocation ?? const LatLng(0, 0),
                             zoom: 15,
                           ),
+                          mapType: _mapType,
                           markers: _markers,
                           myLocationEnabled: true,
                           myLocationButtonEnabled: true,
                           onMapCreated: (controller) {
                             _mapController = controller;
-                            _mapInitialized = true;
+                            setState(() {
+                              _mapInitialized = true;
+                            });
                             // Clear any error if map successfully loads
                             if (_mapError != null) {
                               setState(() {
@@ -656,6 +879,47 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                           ),
                         ),
                       ),
+                    // Map type toggle button (top right)
+                    Positioned(
+                      top: 10,
+                      right: 10,
+                      child: FloatingActionButton(
+                        mini: true,
+                        onPressed: () {
+                          setState(() {
+                            _mapType = _mapType == MapType.normal 
+                                ? MapType.satellite 
+                                : MapType.normal;
+                          });
+                          debugPrint('🗺️ Map type changed to: $_mapType');
+                        },
+                        backgroundColor: Colors.white,
+                        child: Icon(
+                          _mapType == MapType.normal ? Icons.satellite : Icons.map,
+                          color: Colors.blue,
+                        ),
+                      ),
+                    ),
+                    // Google Maps directions button (above END EMERGENCY button)
+                    if (_emergencyLocation != null)
+                      Positioned(
+                        bottom: 100,
+                        left: 20,
+                        right: 20,
+                        child: ElevatedButton.icon(
+                          onPressed: _openGoogleMapsDirections,
+                          icon: const Icon(Icons.directions, color: Colors.white),
+                          label: const Text(
+                            'Open in Google Maps',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4285F4), // Google Maps blue
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                    // END EMERGENCY button
                     Positioned(
                       bottom: 20,
                       left: 20,

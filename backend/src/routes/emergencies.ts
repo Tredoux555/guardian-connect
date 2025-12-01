@@ -30,6 +30,7 @@ router.post(
 
       // Create emergency
       const emergency = await Emergency.create(userId);
+      console.log(`🚨 Emergency created: ${emergency.id} by user ${userId}`);
 
       // Get user's emergency contacts
       const contactsResult = await query(
@@ -40,20 +41,27 @@ router.post(
       );
 
       const contacts = contactsResult.rows;
+      console.log(`📋 Found ${contacts.length} emergency contacts for user ${userId}:`);
+      contacts.forEach((c: any, i: number) => {
+        console.log(`   ${i + 1}. ${c.contact_name || 'Unknown'} (${c.contact_email}) - user_id: ${c.contact_user_id || 'NOT REGISTERED'}`);
+      });
 
       // Add all contacts as participants (status: pending)
       const participantPromises = contacts.map(async (contact: any) => {
         if (contact.contact_user_id) {
           // Contact is a registered user
           await Emergency.addParticipant(emergency.id, contact.contact_user_id);
+          console.log(`   ✅ Added participant: ${contact.contact_user_id}`);
           return { userId: contact.contact_user_id, name: contact.contact_name };
         }
+        console.log(`   ⚠️ Contact ${contact.contact_email} is NOT a registered user - cannot notify`);
         return null;
       });
 
       const participants = (await Promise.all(participantPromises)).filter(
         (p: any) => p !== null
       );
+      console.log(`👥 Total participants to notify: ${participants.length}`);
 
       // Get sender display name and email for notifications
       const userResult = await query(
@@ -66,6 +74,8 @@ router.post(
       // Send notifications to all registered contacts
       for (const participant of participants) {
         if (participant && participant.userId) {
+          console.log(`📤 Sending notifications to: ${participant.userId} (${participant.name})`);
+          
           // Send Firebase push notification (for mobile apps)
           try {
             await sendEmergencyAlert(
@@ -74,8 +84,9 @@ router.post(
               senderDisplayName,
               undefined // Location will be sent when user accepts
             );
+            console.log(`   ✅ Firebase push sent to ${participant.userId}`);
           } catch (error) {
-            console.error(`Failed to send Firebase alert to ${participant.userId}:`, error);
+            console.error(`   ❌ Failed to send Firebase alert to ${participant.userId}:`, error);
           }
 
           // Send Web Push notification (for web browsers - works even when app is closed)
@@ -85,11 +96,13 @@ router.post(
               emergency.id,
               senderDisplayName
             );
+            console.log(`   ✅ Web push sent to ${participant.userId}`);
           } catch (error) {
-            console.error(`Failed to send web push to ${participant.userId}:`, error);
+            console.error(`   ❌ Failed to send web push to ${participant.userId}:`, error);
           }
 
           // Emit socket event (for real-time updates when app is open)
+          console.log(`   📡 Emitting socket event 'emergency_created' to user:${participant.userId}`);
           emitToUser(participant.userId, 'emergency_created', {
             emergencyId: emergency.id,
             userId,
@@ -99,6 +112,7 @@ router.post(
           });
         }
       }
+      console.log(`✅ Emergency ${emergency.id} created and all notifications sent`)
 
       res.status(201).json({
         emergency: {
@@ -220,7 +234,41 @@ router.post(
 
       const emergencyId = req.params.id;
       const userId = req.userId!;
-      const { latitude, longitude } = req.body;
+      const { latitude, longitude, accuracy } = req.body;
+
+      // Reject known fallback/default coordinates that browsers return when GPS isn't available
+      // San Francisco fallback (Google's default): 37.785834, -122.406417
+      // This happens when:
+      // - Desktop browsers use IP-based geolocation
+      // - VPN makes IP appear in San Francisco
+      // - Browser can't access real GPS
+      const isSanFranciscoFallback = 
+        (Math.abs(latitude - 37.785834) < 0.0001 && Math.abs(longitude - (-122.406417)) < 0.0001) ||
+        (Math.abs(latitude - 37.7858) < 0.001 && Math.abs(longitude - (-122.4064)) < 0.001);
+      
+      const isNullIslandFallback = Math.abs(latitude) < 0.001 && Math.abs(longitude) < 0.001;
+      
+      if (isSanFranciscoFallback || isNullIslandFallback) {
+        console.warn(`⚠️ Rejecting fallback location for user ${userId}:`, {
+          latitude,
+          longitude,
+          reason: isSanFranciscoFallback ? 'San Francisco fallback (IP-based)' : 'Null Island fallback',
+          emergencyId
+        });
+        return res.status(400).json({ 
+          error: 'Invalid location: Browser returned fallback coordinates. Please enable GPS or use a mobile device for accurate location.',
+          code: 'FALLBACK_LOCATION',
+          details: {
+            detected: isSanFranciscoFallback ? 'san_francisco_fallback' : 'null_island_fallback',
+            suggestion: 'Use mobile device with GPS enabled for accurate emergency location'
+          }
+        });
+      }
+
+      // Warn about low accuracy locations (but still accept them)
+      if (accuracy && accuracy > 1000) {
+        console.warn(`⚠️ Low accuracy location from user ${userId}: ${accuracy}m (emergency: ${emergencyId})`);
+      }
 
       // Verify emergency exists and is active
       const emergency = await Emergency.findById(emergencyId);
@@ -287,6 +335,15 @@ router.get('/pending', authenticate, async (req: AuthRequest, res: Response) => 
        ORDER BY e.created_at DESC`,
       [userId]
     );
+    
+    // Log when there are pending emergencies (helpful for debugging)
+    if (result.rows.length > 0) {
+      console.log(`📥 User ${userId} has ${result.rows.length} pending emergency(ies):`);
+      result.rows.forEach((e: any, i: number) => {
+        console.log(`   ${i + 1}. ${e.id} from ${e.sender_display_name || e.sender_email}`);
+      });
+    }
+    
     res.json(result.rows);
   } catch (error) {
     console.error('Get pending emergencies error:', error);
