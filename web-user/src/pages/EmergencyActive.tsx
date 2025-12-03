@@ -2040,6 +2040,133 @@ function EmergencyActive() {
         </div>
       )}
 
+      {/* Who's Coming banner - only for sender */}
+      {isSender && (
+        <div style={{
+          padding: '1rem',
+          backgroundColor: acceptedParticipants.length > 0 ? '#d4edda' : '#cce5ff',
+          borderRadius: '12px',
+          margin: '1rem 0',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Responder avatars */}
+            {acceptedParticipants.length > 0 ? (
+              <div style={{ display: 'flex', marginLeft: '4px' }}>
+                {acceptedParticipants.slice(0, 3).map((p: any, index: number) => {
+                  const colors = ['#4CAF50', '#9C27B0', '#2196F3', '#FF9800', '#00BCD4', '#E91E63']
+                  const color = colors[index % colors.length]
+                  const name = p.user_display_name || p.user_email || 'R'
+                  const initials = name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        backgroundColor: color,
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 'bold',
+                        fontSize: '12px',
+                        border: '2px solid white',
+                        marginLeft: index > 0 ? '-12px' : '0',
+                        zIndex: 3 - index,
+                      }}
+                      title={name}
+                    >
+                      {initials}
+                    </div>
+                  )
+                })}
+                {acceptedParticipants.length > 3 && (
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      backgroundColor: '#666',
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 'bold',
+                      fontSize: '12px',
+                      border: '2px solid white',
+                      marginLeft: '-12px',
+                    }}
+                  >
+                    +{acceptedParticipants.length - 3}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span style={{ fontSize: '24px' }}>⏳</span>
+            )}
+            
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                fontWeight: 'bold', 
+                fontSize: '1rem',
+                color: acceptedParticipants.length > 0 ? '#155724' : '#004085'
+              }}>
+                {acceptedParticipants.length > 0 
+                  ? `${acceptedParticipants.length} ${acceptedParticipants.length === 1 ? 'person' : 'people'} coming to help`
+                  : 'Waiting for responders...'}
+              </div>
+              {acceptedParticipants.length > 0 && (
+                <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '2px' }}>
+                  {acceptedParticipants.map((p: any) => p.user_display_name || p.user_email).join(', ')}
+                </div>
+              )}
+            </div>
+            
+            {/* Focus all button */}
+            {acceptedParticipants.length > 0 && mapRef.current && (
+              <button
+                onClick={() => {
+                  // Fit bounds to show all responders and sender
+                  const responderLocations = locations.filter(loc => 
+                    String(loc.user_id) !== String(emergency?.user_id)
+                  )
+                  if (responderLocations.length === 0) return
+                  
+                  const bounds = new google.maps.LatLngBounds()
+                  
+                  // Add sender location
+                  if (senderLocation) {
+                    bounds.extend({ lat: senderLocation.latitude, lng: senderLocation.longitude })
+                  }
+                  
+                  // Add all responder locations
+                  responderLocations.forEach(loc => {
+                    bounds.extend({ lat: loc.latitude, lng: loc.longitude })
+                  })
+                  
+                  mapRef.current?.fitBounds(bounds, 80)
+                }}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#4A90E2',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                📍 Show All
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Google Maps directions - only for responders */}
       {googleMapsButton}
 
@@ -2052,11 +2179,60 @@ function EmergencyActive() {
         {acceptedParticipants.length > 0 && (
           <div className="participant-group">
             <h3>✅ Responding ({acceptedParticipants.length})</h3>
-            {acceptedParticipants.map((p: any) => (
-              <div key={p.id} className="participant accepted">
-                {p.user_display_name || p.user_email || 'Responder'} - Responding
-              </div>
-            ))}
+            {acceptedParticipants.map((p: any, index: number) => {
+              // Find this responder's location
+              const responderLoc = locations.find(loc => String(loc.user_id) === String(p.user_id))
+              const colors = ['#4CAF50', '#9C27B0', '#2196F3', '#FF9800', '#00BCD4', '#E91E63']
+              const color = colors[index % colors.length]
+              const name = p.user_display_name || p.user_email || 'Responder'
+              const initials = name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
+              
+              return (
+                <div 
+                  key={p.id} 
+                  className="participant accepted"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    cursor: responderLoc && mapRef.current ? 'pointer' : 'default',
+                  }}
+                  onClick={() => {
+                    if (responderLoc && mapRef.current) {
+                      mapRef.current.panTo({ lat: responderLoc.latitude, lng: responderLoc.longitude })
+                      mapRef.current.setZoom(16)
+                    }
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      backgroundColor: color,
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 'bold',
+                      fontSize: '11px',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {initials}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: '500' }}>{name}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#666' }}>
+                      {responderLoc ? '📍 Tap to focus on map' : '⏳ Waiting for location...'}
+                    </div>
+                  </div>
+                  {responderLoc && (
+                    <span style={{ fontSize: '1.2rem' }}>📍</span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 
