@@ -59,7 +59,11 @@ export const initializeSocket = (httpServer: HTTPServer) => {
     }
   });
 
-  // Log connection errors for debugging
+  // Log ALL engine events for debugging
+  io.engine.on('initial_headers', (headers: any, req: any) => {
+    console.log('🔌 Socket: Initial request from', req.headers?.['user-agent']?.substring(0, 50) || 'unknown');
+  });
+
   io.engine.on('connection_error', (err) => {
     console.log('⚠️ Socket connection error:', err.code, '-', err.message);
   });
