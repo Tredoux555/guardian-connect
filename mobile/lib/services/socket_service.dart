@@ -1,8 +1,7 @@
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:flutter/foundation.dart'; // For debugPrint
-import 'dart:async'; // For Completer and TimeoutException
-import 'dart:math'; // For exponential backoff
+import 'package:flutter/foundation.dart';
+import 'dart:async';
 import '../config/app_config.dart';
 
 class SocketService {
@@ -10,259 +9,160 @@ class SocketService {
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
   static String get socketUrl => AppConfig.socketUrl;
   static bool _isConnecting = false;
-  static int _retryCount = 0;
-  static const int _maxRetries = 2; // Reduced to 2 retries (3 total attempts) to prevent accumulation
-  static DateTime? _lastConnectionAttempt;
-  static const Duration _minRetryInterval = Duration(seconds: 30); // Don't retry more than once per 30 seconds
+  static Completer<IO.Socket?>? _connectionCompleter;
 
+  /// Connect to socket server
+  /// Returns the socket if connected, null if failed
   static Future<IO.Socket?> connect() async {
+    // Already connected
+    if (_socket != null && _socket!.connected) {
+      return _socket!;
+    }
+
+    // Connection in progress - wait for it
+    if (_isConnecting && _connectionCompleter != null) {
+      return _connectionCompleter!.future;
+    }
+
+    _isConnecting = true;
+    _connectionCompleter = Completer<IO.Socket?>();
+
     try {
-      // If already connected, return existing socket
-      if (_socket != null && _socket!.connected) {
-        debugPrint('✅ Socket already connected');
-        return _socket!;
-      }
-
-      // Rate limiting: Don't retry too frequently if we've exhausted retries
-      if (_lastConnectionAttempt != null && _retryCount >= _maxRetries) {
-        final timeSinceLastAttempt = DateTime.now().difference(_lastConnectionAttempt!);
-        if (timeSinceLastAttempt < _minRetryInterval) {
-          debugPrint('⚠️ Socket connection retries exhausted, waiting ${_minRetryInterval.inSeconds - timeSinceLastAttempt.inSeconds}s before next attempt');
-          return null; // Return null instead of retrying immediately
-        } else {
-          // Enough time has passed, reset retry count
-          _retryCount = 0;
-        }
-      }
-
-      // Prevent multiple simultaneous connection attempts
-      if (_isConnecting) {
-        debugPrint('⚠️ Socket connection already in progress, waiting...');
-        // Wait for existing connection attempt
-        int attempts = 0;
-        while (_isConnecting && attempts < 30) {
-          await Future.delayed(const Duration(milliseconds: 500));
-          if (_socket != null && _socket!.connected) {
-            return _socket!;
-          }
-          attempts++;
-        }
-        // If we waited and still not connected, return null
-        if (_socket == null || !_socket!.connected) {
-          return null;
-        }
-      }
-
-      _lastConnectionAttempt = DateTime.now();
-
-      _isConnecting = true;
       final token = await _storage.read(key: 'access_token');
       
       if (token == null || token.isEmpty) {
-        debugPrint('❌ No access token available for socket connection');
-        _isConnecting = false;
-        throw Exception('No access token available');
+        debugPrint('❌ Socket: No auth token');
+        _completeConnection(null);
+        return null;
       }
-      
-      debugPrint('🔌 Attempting socket connection to $socketUrl');
-      debugPrint('   Token available: ${token.isNotEmpty}');
-      debugPrint('   Token length: ${token.length}');
-      debugPrint('   Socket path: /socket.io/');
-      
-      // Disconnect existing socket if any
-      if (_socket != null) {
-        _socket!.disconnect();
-        _socket!.dispose();
-        _socket = null;
-      }
-      
-      // Build socket options
-      // For Railway compatibility, use polling only (WebSocket upgrades may fail)
-      final options = IO.OptionBuilder()
-          .setTransports(['polling']) // Use polling only for Railway compatibility
-          .setAuth({'token': token})
-          .enableAutoConnect()
-          .setTimeout(60000) // Increase timeout to 60 seconds for Railway
-          .setPath('/socket.io/'); // Explicit path for socket.io
-      
-      // Only add ngrok headers if configured (for development/ngrok)
-      if (AppConfig.includeNgrokHeaders) {
-        options.setExtraHeaders({'ngrok-skip-browser-warning': 'true'});
-        options.setQuery({'ngrok-skip-browser-warning': 'true'});
-      }
-      
-      _socket = IO.io(socketUrl, options.build());
 
-      // Set up event listeners BEFORE connection attempt
+      debugPrint('🔌 Socket: Connecting to $socketUrl');
+
+      // Clean up old socket
+      _socket?.disconnect();
+      _socket?.dispose();
+
+      // Create socket with POLLING FIRST (more reliable through proxies)
+      // Socket.io will auto-upgrade to websocket after initial connection
+      _socket = IO.io(
+        socketUrl,
+        IO.OptionBuilder()
+            .setTransports(['polling', 'websocket']) // Polling first!
+            .setPath('/socket.io/')
+            .setAuth({'token': token})
+            .enableAutoConnect()
+            .enableReconnection()
+            .setReconnectionAttempts(5)
+            .setReconnectionDelay(1000)
+            .setReconnectionDelayMax(5000)
+            .setTimeout(20000)
+            .build(),
+      );
+
+      // Connection success
       _socket!.onConnect((_) {
-        debugPrint('✅ Socket connected successfully');
-        _isConnecting = false;
+        debugPrint('✅ Socket: Connected');
+        _completeConnection(_socket);
       });
 
-      _socket!.onDisconnect((reason) {
-        debugPrint('⚠️ Socket disconnected: $reason');
-        _isConnecting = false;
-      });
-
-      _socket!.onError((error) {
-        debugPrint('❌ Socket error: $error');
-        _isConnecting = false;
-      });
-
+      // Connection error
       _socket!.onConnectError((error) {
-        debugPrint('❌ Socket connection error: $error');
-        debugPrint('   Socket URL: $socketUrl');
-        debugPrint('   Token available: ${token.isNotEmpty}');
-        debugPrint('   Error type: ${error.runtimeType}');
-        debugPrint('   Error details: ${error.toString()}');
-        _isConnecting = false;
+        debugPrint('❌ Socket: Connection error - $error');
+        _completeConnection(null);
       });
-      
-      // Add more detailed error handlers
-      _socket!.onError((error) {
-        debugPrint('❌ Socket error event: $error');
-      });
-      
+
+      // Disconnection
       _socket!.onDisconnect((reason) {
-        debugPrint('⚠️ Socket disconnected: $reason');
+        debugPrint('⚠️ Socket: Disconnected - $reason');
+      });
+
+      // Reconnection
+      _socket!.on('reconnect', (_) {
+        debugPrint('✅ Socket: Reconnected');
+      });
+
+      // Error
+      _socket!.onError((error) {
+        debugPrint('❌ Socket: Error - $error');
       });
 
       // Wait for connection with timeout
-      final completer = Completer<IO.Socket?>();
-      bool connectionHandled = false;
-
-      _socket!.onConnect((_) {
-        if (!connectionHandled) {
-          connectionHandled = true;
-          _isConnecting = false;
-          _retryCount = 0; // Reset retry count on success
-          completer.complete(_socket);
-        }
-      });
-
-      _socket!.onConnectError((error) {
-        if (!connectionHandled) {
-          connectionHandled = true;
-          _isConnecting = false;
-          // Don't complete with error, complete with null instead
-          debugPrint('⚠️ Socket connection failed, continuing without real-time features');
-          debugPrint('   Error: $error');
-          completer.complete(null);
-        }
-      });
-      
-      // Wait up to 45 seconds for connection (Railway may be slow)
-      try {
-        final connectedSocket = await completer.future.timeout(
-          const Duration(seconds: 45),
-          onTimeout: () {
-            _isConnecting = false;
-            debugPrint('⚠️ Socket connection timed out after 45 seconds');
-            debugPrint('   Socket.io may not be available - app will work without real-time features');
-            debugPrint('   This is common on Railway - polling will handle emergency detection');
-            return null;
-          },
-        );
-        if (connectedSocket != null) {
-          debugPrint('✅ Socket connection established');
-          _retryCount = 0; // Reset retry count on success
-          return connectedSocket;
-        } else {
-          // Connection failed - retry with exponential backoff
-          if (_retryCount < _maxRetries) {
-            _retryCount++;
-            final delaySeconds = min(3 * pow(2, _retryCount - 1).toInt(), 12); // 3s, 6s, 12s
-            debugPrint('🔄 Socket connection failed, retrying in ${delaySeconds}s... (attempt $_retryCount/$_maxRetries)');
-            await Future.delayed(Duration(seconds: delaySeconds));
-            _isConnecting = false; // Reset flag to allow retry
-            return connect(); // Recursive retry
-          } else {
-            debugPrint('⚠️ Socket connection failed after $_maxRetries attempts, continuing without real-time features');
-            _retryCount = 0; // Reset for next connection attempt
-            return null;
-          }
-        }
-      } catch (e) {
-        _isConnecting = false;
-        final errorStr = e.toString();
-        // Retry on handshake errors
-        if ((errorStr.contains('HandshakeException') || 
-             errorStr.contains('Connection terminated') ||
-             errorStr.contains('TlsException')) && 
-            _retryCount < _maxRetries) {
-          _retryCount++;
-          final delaySeconds = min(3 * pow(2, _retryCount - 1).toInt(), 12);
-          debugPrint('🔄 SSL handshake failed, retrying in ${delaySeconds}s... (attempt $_retryCount/$_maxRetries)');
-          await Future.delayed(Duration(seconds: delaySeconds));
-          return connect(); // Recursive retry
-        }
-        debugPrint('❌ Failed to establish socket connection: $e');
-        _retryCount = 0;
-        return null;
-      }
+      return await _connectionCompleter!.future.timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          debugPrint('⚠️ Socket: Connection timeout');
+          _completeConnection(null);
+          return null;
+        },
+      );
     } catch (e) {
-      _isConnecting = false;
-      final errorStr = e.toString();
-      // Retry on handshake errors
-      if ((errorStr.contains('HandshakeException') || 
-           errorStr.contains('Connection terminated') ||
-           errorStr.contains('TlsException')) && 
-          _retryCount < _maxRetries) {
-        _retryCount++;
-        final delaySeconds = min(3 * pow(2, _retryCount - 1).toInt(), 12);
-        debugPrint('🔄 SSL handshake failed, retrying in ${delaySeconds}s... (attempt $_retryCount/$_maxRetries)');
-        await Future.delayed(Duration(seconds: delaySeconds));
-        return connect(); // Recursive retry
-      }
-      debugPrint('❌ Error connecting to socket: $e');
-      _retryCount = 0;
+      debugPrint('❌ Socket: Exception - $e');
+      _completeConnection(null);
       return null;
     }
   }
 
-  static void disconnect() {
+  static void _completeConnection(IO.Socket? result) {
     _isConnecting = false;
-    _retryCount = 0; // Reset retry count on disconnect
+    if (_connectionCompleter != null && !_connectionCompleter!.isCompleted) {
+      _connectionCompleter!.complete(result);
+    }
+    _connectionCompleter = null;
+  }
+
+  /// Disconnect from socket server
+  static void disconnect() {
     _socket?.disconnect();
     _socket?.dispose();
     _socket = null;
+    _isConnecting = false;
+    _connectionCompleter = null;
   }
 
+  /// Join an emergency room
   static void joinEmergency(String emergencyId) {
-    if (_socket != null && _socket!.connected) {
+    if (_socket?.connected ?? false) {
       _socket!.emit('join_emergency', emergencyId);
-      debugPrint('📡 Joined emergency room: $emergencyId');
+      debugPrint('📍 Socket: Joined emergency $emergencyId');
     } else {
-      debugPrint('⚠️ Cannot join emergency - socket not connected');
+      debugPrint('⚠️ Socket: Cannot join emergency - not connected');
+      // Try to connect and then join
+      connect().then((socket) {
+        if (socket?.connected ?? false) {
+          socket!.emit('join_emergency', emergencyId);
+          debugPrint('📍 Socket: Joined emergency $emergencyId (after reconnect)');
+        }
+      });
     }
   }
 
+  /// Leave an emergency room
   static void leaveEmergency(String emergencyId) {
-    if (_socket != null && _socket!.connected) {
+    if (_socket?.connected ?? false) {
       _socket!.emit('leave_emergency', emergencyId);
-      debugPrint('📡 Left emergency room: $emergencyId');
+      debugPrint('📍 Socket: Left emergency $emergencyId');
     }
   }
 
+  /// Listen for an event
   static void on(String event, Function(dynamic) callback) {
     _socket?.on(event, callback);
   }
 
+  /// Remove event listener
   static void off(String event) {
     _socket?.off(event);
   }
 
+  /// Emit an event
   static void emit(String event, dynamic data) {
-    if (_socket != null && _socket!.connected) {
+    if (_socket?.connected ?? false) {
       _socket!.emit(event, data);
     } else {
-      debugPrint('⚠️ Cannot emit event - socket not connected: $event');
+      debugPrint('⚠️ Socket: Cannot emit $event - not connected');
     }
   }
+
+  /// Check if connected
+  static bool get isConnected => _socket?.connected ?? false;
 }
-
-
-
-
-
-
