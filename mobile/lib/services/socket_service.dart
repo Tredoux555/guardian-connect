@@ -12,15 +12,16 @@ class SocketService {
   static Completer<IO.Socket?>? _connectionCompleter;
 
   /// Connect to socket server
-  /// Returns the socket if connected, null if failed
   static Future<IO.Socket?> connect() async {
     // Already connected
     if (_socket != null && _socket!.connected) {
+      debugPrint('✅ Socket: Already connected');
       return _socket!;
     }
 
     // Connection in progress - wait for it
     if (_isConnecting && _connectionCompleter != null) {
+      debugPrint('⏳ Socket: Connection in progress, waiting...');
       return _connectionCompleter!.future;
     }
 
@@ -31,72 +32,95 @@ class SocketService {
       final token = await _storage.read(key: 'access_token');
       
       if (token == null || token.isEmpty) {
-        debugPrint('❌ Socket: No auth token');
+        debugPrint('❌ Socket: No auth token available');
         _completeConnection(null);
         return null;
       }
 
       debugPrint('🔌 Socket: Connecting to $socketUrl');
+      debugPrint('   Token length: ${token.length}');
 
       // Clean up old socket
-      _socket?.disconnect();
-      _socket?.dispose();
+      if (_socket != null) {
+        _socket!.dispose();
+        _socket = null;
+      }
 
-      // Create socket with POLLING FIRST (more reliable through proxies)
-      // Socket.io will auto-upgrade to websocket after initial connection
+      // Create socket - DO NOT auto connect yet
       _socket = IO.io(
         socketUrl,
         IO.OptionBuilder()
-            .setTransports(['polling', 'websocket']) // Polling first!
+            .setTransports(['polling', 'websocket'])
             .setPath('/socket.io/')
             .setAuth({'token': token})
-            .enableAutoConnect()
+            .disableAutoConnect() // Important: don't connect until handlers are set up
             .enableReconnection()
             .setReconnectionAttempts(5)
             .setReconnectionDelay(1000)
             .setReconnectionDelayMax(5000)
-            .setTimeout(20000)
             .build(),
       );
 
-      // Connection success
+      // Set up ALL event handlers BEFORE connecting
       _socket!.onConnect((_) {
-        debugPrint('✅ Socket: Connected');
-        _completeConnection(_socket);
+        debugPrint('✅ Socket: Connected successfully');
+        if (!_connectionCompleter!.isCompleted) {
+          _isConnecting = false;
+          _connectionCompleter!.complete(_socket);
+        }
       });
 
-      // Connection error
       _socket!.onConnectError((error) {
         debugPrint('❌ Socket: Connection error - $error');
-        _completeConnection(null);
+        if (!_connectionCompleter!.isCompleted) {
+          _completeConnection(null);
+        }
       });
 
-      // Disconnection
-      _socket!.onDisconnect((reason) {
-        debugPrint('⚠️ Socket: Disconnected - $reason');
-      });
-
-      // Reconnection
-      _socket!.on('reconnect', (_) {
-        debugPrint('✅ Socket: Reconnected');
-      });
-
-      // Error
       _socket!.onError((error) {
         debugPrint('❌ Socket: Error - $error');
       });
 
+      _socket!.onDisconnect((reason) {
+        debugPrint('⚠️ Socket: Disconnected - $reason');
+      });
+
+      _socket!.on('reconnect', (_) {
+        debugPrint('✅ Socket: Reconnected');
+      });
+
+      _socket!.on('reconnect_attempt', (attempt) {
+        debugPrint('🔄 Socket: Reconnect attempt $attempt');
+      });
+
+      _socket!.on('reconnect_error', (error) {
+        debugPrint('❌ Socket: Reconnect error - $error');
+      });
+
+      // NOW connect after handlers are set up
+      debugPrint('🔌 Socket: Initiating connection...');
+      _socket!.connect();
+
       // Wait for connection with timeout
-      return await _connectionCompleter!.future.timeout(
-        const Duration(seconds: 15),
-        onTimeout: () {
-          debugPrint('⚠️ Socket: Connection timeout');
-          _completeConnection(null);
-          return null;
-        },
-      );
+      try {
+        final result = await _connectionCompleter!.future.timeout(
+          const Duration(seconds: 20),
+          onTimeout: () {
+            debugPrint('⚠️ Socket: Connection timeout after 20s');
+            debugPrint('   Socket connected: ${_socket?.connected}');
+            debugPrint('   Socket ID: ${_socket?.id}');
+            _completeConnection(null);
+            return null;
+          },
+        );
+        return result;
+      } catch (e) {
+        debugPrint('❌ Socket: Connection exception - $e');
+        _completeConnection(null);
+        return null;
+      }
     } catch (e) {
-      debugPrint('❌ Socket: Exception - $e');
+      debugPrint('❌ Socket: Setup exception - $e');
       _completeConnection(null);
       return null;
     }
@@ -112,10 +136,14 @@ class SocketService {
 
   /// Disconnect from socket server
   static void disconnect() {
+    debugPrint('🔌 Socket: Disconnecting');
     _socket?.disconnect();
     _socket?.dispose();
     _socket = null;
     _isConnecting = false;
+    if (_connectionCompleter != null && !_connectionCompleter!.isCompleted) {
+      _connectionCompleter!.complete(null);
+    }
     _connectionCompleter = null;
   }
 
@@ -125,8 +153,7 @@ class SocketService {
       _socket!.emit('join_emergency', emergencyId);
       debugPrint('📍 Socket: Joined emergency $emergencyId');
     } else {
-      debugPrint('⚠️ Socket: Cannot join emergency - not connected');
-      // Try to connect and then join
+      debugPrint('⚠️ Socket: Cannot join - not connected, attempting reconnect...');
       connect().then((socket) {
         if (socket?.connected ?? false) {
           socket!.emit('join_emergency', emergencyId);
@@ -165,4 +192,7 @@ class SocketService {
 
   /// Check if connected
   static bool get isConnected => _socket?.connected ?? false;
+  
+  /// Get socket ID (for debugging)
+  static String? get socketId => _socket?.id;
 }
