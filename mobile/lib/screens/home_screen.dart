@@ -7,6 +7,7 @@ import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../services/emergency_service.dart';
 import '../services/push_notification_service.dart';
+import '../services/emergency_alarm_service.dart';
 import 'emergency_active_screen.dart';
 import 'emergency_response_screen.dart';
 import 'settings_screen.dart';
@@ -78,24 +79,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     PushNotificationService.onEmergencyReceived = (emergencyId, senderName) {
       debugPrint('🚨 Push notification: Emergency from $senderName');
       if (mounted && !_hasNavigatedToEmergency) {
+        // 🔊 PLAY LOUD EMERGENCY ALARM - bypasses silent mode
+        EmergencyAlarmService.playEmergencyAlarm(senderName: senderName);
+        
         // Refresh pending emergencies to show the new one
         _checkPendingEmergencies();
         
-        // Show a snackbar notification
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('🚨 $senderName needs help!'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'RESPOND',
-              textColor: Colors.white,
-              onPressed: () {
-                _navigateToEmergencyResponse(emergencyId);
-              },
-            ),
-          ),
-        );
+        // Show a prominent alert dialog instead of just a snackbar
+        _showEmergencyAlertDialog(emergencyId, senderName);
       }
     };
     
@@ -121,6 +112,77 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _hasNavigatedToEmergency = false;
       _checkPendingEmergencies();
     });
+  }
+  
+  /// Show prominent emergency alert dialog with loud alarm
+  void _showEmergencyAlertDialog(String emergencyId, String senderName) {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Must respond or dismiss
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.red.shade50,
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 32),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '🚨 EMERGENCY',
+                style: TextStyle(
+                  color: Colors.red.shade900,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$senderName needs help!',
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Tap RESPOND to help them immediately.',
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              // Stop the alarm
+              EmergencyAlarmService.stopAlarm();
+              Navigator.of(context).pop();
+            },
+            child: const Text('DISMISS'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // Stop the alarm and navigate to emergency
+              EmergencyAlarmService.stopAlarm();
+              Navigator.of(context).pop();
+              _navigateToEmergencyResponse(emergencyId);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: const Text(
+              'RESPOND NOW',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // Refresh active emergency check when returning to this screen

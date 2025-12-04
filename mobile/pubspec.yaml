@@ -34,6 +34,10 @@ dependencies:
   # Push Notifications
   firebase_core: ^4.2.1
   firebase_messaging: ^16.0.4
+  flutter_local_notifications: ^18.0.1
+  
+  # Audio (for emergency alarm)
+  audioplayers: ^6.1.0
   
   # UI
   cupertino_icons: ^1.0.6

@@ -16,6 +16,7 @@ import 'services/log_collector.dart';
 import 'services/push_notification_service.dart';
 import 'services/background_task_service.dart';
 import 'services/offline_storage_service.dart';
+import 'services/emergency_alarm_service.dart';
 import 'widgets/panic_button_widget.dart';
 import 'config/app_config.dart';
 
@@ -53,6 +54,9 @@ void main() async {
   
   // Initialize panic button widget
   await PanicButtonWidget.initialize();
+  
+  // Initialize emergency alarm service (for loud emergency alerts)
+  await EmergencyAlarmService.initialize();
   
   // Run app with error handling
   FlutterError.onError = (FlutterErrorDetails details) {
