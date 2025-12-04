@@ -811,7 +811,10 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('End Emergency?'),
-        content: const Text('Are you sure you want to end this emergency?'),
+        content: const Text(
+          'Are you sure you want to end this emergency?\n\n'
+          'This will notify all responders that the emergency has ended.'
+        ),
         actions: [
           TextButton(
             onPressed: () {
@@ -825,7 +828,10 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
               debugPrint('✅ End emergency confirmed');
               Navigator.of(context).pop(true);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('End Emergency'),
           ),
         ],
@@ -835,33 +841,87 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
     debugPrint('🛑 Dialog result: $confirmed');
 
     if (confirmed == true && mounted && !_hasNavigatedAway) {
+      // Show loading indicator
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 20, 
+                  height: 20, 
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                ),
+                SizedBox(width: 16),
+                Text('Ending emergency...'),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 10),
+          ),
+        );
+      }
+      
       try {
         debugPrint('📡 Sending end emergency request...');
         final response = await ApiService.post('/emergencies/${widget.emergencyId}/end', {});
         debugPrint('✅ End emergency response: ${response.statusCode}');
         
-        if (mounted && !_hasNavigatedAway) {
-          // Set flag to prevent multiple navigation attempts
-          _hasNavigatedAway = true;
-          
-          // Clear the active emergency from the provider
-          final emergencyProvider = Provider.of<EmergencyProvider>(context, listen: false);
-          emergencyProvider.clearEmergency();
-          debugPrint('✅ Cleared active emergency from provider');
-          
-          debugPrint('🧭 Navigating back to home screen...');
-          // Navigate back to home screen
-          Navigator.of(context).pop();
-          // Show success message
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Emergency ended successfully'),
-              backgroundColor: Colors.green,
-            ),
-          );
+        // Hide loading snackbar
+        if (mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        }
+        
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          if (mounted && !_hasNavigatedAway) {
+            // Set flag to prevent multiple navigation attempts
+            _hasNavigatedAway = true;
+            
+            // Clear the active emergency from the provider
+            final emergencyProvider = Provider.of<EmergencyProvider>(context, listen: false);
+            emergencyProvider.clearEmergency();
+            debugPrint('✅ Cleared active emergency from provider');
+            
+            debugPrint('🧭 Navigating back to home screen...');
+            // Navigate back to home screen
+            Navigator.of(context).pop();
+            // Show success message
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('✅ Emergency ended successfully'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } else if (response.statusCode == 403) {
+          // User is not authorized to end this emergency
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('⚠️ Only the person who created the emergency can end it'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
+        } else {
+          // Other error
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error ending emergency: ${response.statusCode}'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         }
       } catch (e) {
         debugPrint('❌ Error ending emergency: $e');
+        // Hide loading snackbar
+        if (mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        }
+        
         if (mounted && !_hasNavigatedAway) {
           // Show user-friendly error message
           final errorMessage = e.toString().replaceFirst('Exception: ', '');
@@ -870,7 +930,9 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
               content: Text(
                 errorMessage.contains('interrupted') || errorMessage.contains('unstable')
                   ? 'Connection interrupted. Please try again.'
-                  : 'Error ending emergency: ${errorMessage.length > 50 ? errorMessage.substring(0, 50) + "..." : errorMessage}'
+                  : errorMessage.contains('403') || errorMessage.contains('authorized')
+                    ? 'Only the person who created the emergency can end it'
+                    : 'Error ending emergency. Please try again.'
               ),
               backgroundColor: Colors.red,
               duration: const Duration(seconds: 4),
@@ -1556,15 +1618,23 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
       appBar: AppBar(
         title: const Text('Active Emergency'),
         actions: [
-          // End Emergency button in app bar (for sender)
-          if (shouldShowEndButton)
-            IconButton(
-              icon: const Icon(Icons.stop_circle, color: Colors.red),
-              tooltip: 'End Emergency',
-              onPressed: _endEmergency,
-            ),
+          // End Emergency button in app bar - ALWAYS show for easy access
+          // Backend will validate if user is authorized to end it
+          IconButton(
+            icon: const Icon(Icons.stop_circle, color: Colors.red, size: 28),
+            tooltip: 'End Emergency',
+            onPressed: _endEmergency,
+          ),
         ],
       ),
+      // Floating action button for ending emergency - always visible
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _endEmergency,
+        backgroundColor: Colors.red,
+        icon: const Icon(Icons.stop, color: Colors.white),
+        label: const Text('END', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
       body: _currentPosition == null
           ? const Center(
               child: Column(
@@ -1883,21 +1953,33 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                           ),
                         ),
                       ),
-                    // END EMERGENCY button (just above chat widget) - ONLY show for sender
-                    if (shouldShowEndButton)
-                      Positioned(
-                        bottom: 300, // Just above chat widget (chat is 300px tall)
-                        left: 20,
-                        right: 20,
-                        child: ElevatedButton(
-                          onPressed: _endEmergency,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
+                    // END EMERGENCY button (just above chat widget) - Always visible
+                    // Backend will validate if user is authorized to end it
+                    Positioned(
+                      bottom: 310, // Just above chat widget (chat is 300px tall)
+                      left: 20,
+                      right: 20,
+                      child: ElevatedButton.icon(
+                        onPressed: _endEmergency,
+                        icon: const Icon(Icons.stop_circle, color: Colors.white),
+                        label: const Text(
+                          'END EMERGENCY',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
                           ),
-                          child: const Text('END EMERGENCY'),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          elevation: 4,
                         ),
                       ),
+                    ),
                     // Emergency Chat Widget (fixed at bottom)
                     Positioned(
                       bottom: 0,
