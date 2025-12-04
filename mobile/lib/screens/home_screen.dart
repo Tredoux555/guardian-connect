@@ -6,11 +6,14 @@ import '../models/emergency.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../services/emergency_service.dart';
+import '../services/push_notification_service.dart';
 import 'emergency_active_screen.dart';
 import 'emergency_response_screen.dart';
 import 'settings_screen.dart';
 import 'auth/login_screen.dart';
+import 'diagnostic_screen.dart';
 import 'dart:convert';
+import 'dart:async';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,7 +22,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _hasInitialized = false; // Add flag to prevent multiple initializations
   
   List<Map<String, dynamic>> _pendingEmergencies = [];
@@ -34,16 +37,89 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    // Register for app lifecycle changes
+    WidgetsBinding.instance.addObserver(this);
     // Delay initialization to ensure widget is fully mounted
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_hasInitialized) {
         _hasInitialized = true;
         _setupSocketListener();
+        _setupPushNotificationHandlers();
         _checkActiveEmergency();
         _checkPendingEmergencies();
-        // Start aggressive polling for emergencies
+        // Start polling for emergencies (reduced frequency - push notifications are primary)
         _startPendingEmergencyPolling();
       }
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // When app comes to foreground, immediately check for emergencies
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('📱 App resumed - immediately checking for emergencies');
+      if (mounted && !_isCreatingEmergency && !_pollingPaused) {
+        _checkPendingEmergencies();
+        _checkActiveEmergency();
+      }
+    }
+  }
+  
+  /// Set up push notification handlers for emergency alerts
+  void _setupPushNotificationHandlers() {
+    // Handle emergency notifications received while app is open
+    PushNotificationService.onEmergencyReceived = (emergencyId, senderName) {
+      debugPrint('🚨 Push notification: Emergency from $senderName');
+      if (mounted && !_hasNavigatedToEmergency) {
+        // Refresh pending emergencies to show the new one
+        _checkPendingEmergencies();
+        
+        // Show a snackbar notification
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('🚨 $senderName needs help!'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'RESPOND',
+              textColor: Colors.white,
+              onPressed: () {
+                _navigateToEmergencyResponse(emergencyId);
+              },
+            ),
+          ),
+        );
+      }
+    };
+    
+    // Handle notification taps (app was in background)
+    PushNotificationService.onNotificationTapped = (emergencyId) {
+      debugPrint('🚨 Notification tapped: Emergency $emergencyId');
+      if (mounted && !_hasNavigatedToEmergency) {
+        _navigateToEmergencyResponse(emergencyId);
+      }
+    };
+  }
+  
+  /// Navigate to emergency response screen
+  void _navigateToEmergencyResponse(String emergencyId) {
+    if (_hasNavigatedToEmergency) return;
+    _hasNavigatedToEmergency = true;
+    
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => EmergencyResponseScreen(emergencyId: emergencyId),
+      ),
+    ).then((_) {
+      _hasNavigatedToEmergency = false;
+      _checkPendingEmergencies();
     });
   }
 
@@ -80,7 +156,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // Don't poll if paused or creating emergency
     if (_pollingPaused || _isCreatingEmergency || !mounted) {
       // Retry after a delay if paused
-      Future.delayed(const Duration(seconds: 5), () {
+      Future.delayed(const Duration(seconds: 10), () {
         if (mounted && !_pollingPaused && !_isCreatingEmergency) {
           _startPendingEmergencyPolling();
         }
@@ -88,8 +164,11 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     
-    // Aggressive polling: 3 seconds for first 20 polls (1 minute), then every 8 seconds
-    final pollInterval = _pollCount < 20 ? 3 : 8;
+    // TEMPORARY: Increased polling frequency to catch emergencies faster
+    // TODO: Reduce back to 10s/60s once push notifications are confirmed working
+    // Poll every 3 seconds for first 20 polls (1 minute), then every 15 seconds
+    // This ensures emergencies are caught within 3 seconds if push/socket fail
+    final pollInterval = _pollCount < 20 ? 3 : 15;
     _pollCount++;
     
     Future.delayed(Duration(seconds: pollInterval), () {
@@ -384,9 +463,15 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       // Create emergency using service (handles location sharing with retry)
+      // Add timeout wrapper to prevent stuck loading screen
       final result = await EmergencyService.createEmergency(
         position: position,
         locationRetries: 2,
+      ).timeout(
+        const Duration(seconds: 20), // Add 20 second timeout
+        onTimeout: () {
+          throw TimeoutException('Emergency creation timed out. Please check your connection and try again.');
+        },
       );
 
       // Handle existing emergency case
@@ -467,34 +552,63 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       
       // CRITICAL: Close loading dialog BEFORE navigation
-      // Use rootNavigator to ensure we can close the dialog even if context changes
-      if (context.mounted) {
-        debugPrint('🔄 Closing loading dialog...');
-        try {
-          // Try to close using dialog context first
-          if (dialogContext != null && dialogContext!.mounted) {
-            Navigator.of(dialogContext!, rootNavigator: true).pop();
-          } else {
-            // Fallback: use root navigator
-            Navigator.of(context, rootNavigator: true).pop();
-          }
-          debugPrint('✅ Loading dialog closed');
-        } catch (e) {
-          debugPrint('⚠️ Error closing dialog (continuing anyway): $e');
+      // Use stored navigator reference instead of context.mounted (context may be disposed)
+      debugPrint('🔄 Attempting to close loading dialog and navigate...');
+      try {
+        // Close dialog using stored dialog context or navigator
+        if (dialogContext != null && dialogContext!.mounted) {
+          Navigator.of(dialogContext!, rootNavigator: true).pop();
+          debugPrint('✅ Loading dialog closed via dialogContext');
+        } else if (navigator.canPop()) {
+          navigator.pop();
+          debugPrint('✅ Loading dialog closed via stored navigator');
+        } else {
+          debugPrint('⚠️ Could not close dialog - navigator cannot pop');
         }
-        
-        // Small delay to ensure dialog is fully dismissed
-        await Future.delayed(const Duration(milliseconds: 200));
-        
-        // Navigate to active emergency screen - use rootNavigator to ensure it works
-        if (context.mounted) {
-          debugPrint('🚀 Navigating to EmergencyActiveScreen with ID: ${emergency.id}');
-          Navigator.of(context, rootNavigator: true).push(
-            MaterialPageRoute(
-              builder: (context) => EmergencyActiveScreen(emergencyId: emergency.id),
-            ),
-          );
-          debugPrint('✅ Navigation complete');
+      } catch (e) {
+        debugPrint('⚠️ Error closing dialog (continuing anyway): $e');
+      }
+      
+      // Small delay to ensure dialog is fully dismissed
+      await Future.delayed(const Duration(milliseconds: 200));
+      
+      // Navigate to active emergency screen using stored navigator
+      // Don't rely on context.mounted - use the navigator we stored earlier
+      try {
+        debugPrint('🚀 Navigating to EmergencyActiveScreen with ID: ${emergency.id}');
+        navigator.push(
+          MaterialPageRoute(
+            builder: (context) => EmergencyActiveScreen(emergencyId: emergency.id),
+          ),
+        );
+        debugPrint('✅ Navigation complete');
+      } catch (e) {
+        debugPrint('❌ Navigation failed: $e');
+        // Try with rootNavigator as fallback if context is still available
+        try {
+          if (context.mounted) {
+            Navigator.of(context, rootNavigator: true).push(
+              MaterialPageRoute(
+                builder: (context) => EmergencyActiveScreen(emergencyId: emergency.id),
+              ),
+            );
+            debugPrint('✅ Navigation succeeded with rootNavigator fallback');
+          } else {
+            debugPrint('❌ Context not mounted, cannot navigate');
+            // Last resort: try to navigate using the stored navigator without checking canPop
+            try {
+              navigator.push(
+                MaterialPageRoute(
+                  builder: (context) => EmergencyActiveScreen(emergencyId: emergency.id),
+                ),
+              );
+              debugPrint('✅ Navigation succeeded with direct navigator push');
+            } catch (lastResortError) {
+              debugPrint('❌ Last resort navigation also failed: $lastResortError');
+            }
+          }
+        } catch (fallbackError) {
+          debugPrint('❌ Fallback navigation also failed: $fallbackError');
         }
       }
     } catch (e) {
@@ -516,8 +630,11 @@ class _HomeScreenState extends State<HomeScreen> {
       if (safeContext.mounted) {
         ScaffoldMessenger.of(safeContext).showSnackBar(
           SnackBar(
-            content: Text('Failed to create emergency: ${e.toString()}'),
+            content: Text(e is TimeoutException 
+              ? 'Request timed out. Please check your connection and try again.'
+              : 'Failed to create emergency: ${e.toString()}'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -566,6 +683,18 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Guardian Connect'),
         actions: [
+          // Diagnostic button (always visible for debugging)
+          IconButton(
+            icon: const Icon(Icons.bug_report),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const DiagnosticScreen(),
+                ),
+              );
+            },
+            tooltip: 'System Diagnostics',
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {

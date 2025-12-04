@@ -109,6 +109,7 @@ export class Emergency {
   }
 
   static async getLatestLocations(emergencyId: string): Promise<any[]> {
+    // Get locations with timestamp validation (within last 24 hours) and coordinate validation
     const result = await query(
       `SELECT DISTINCT ON (el.user_id) 
        el.id, el.emergency_id, el.user_id, el.latitude, el.longitude, el.timestamp,
@@ -117,9 +118,20 @@ export class Emergency {
        FROM emergency_locations el
        LEFT JOIN users u ON el.user_id = u.id
        WHERE el.emergency_id = $1
+         AND el.timestamp > NOW() - INTERVAL '24 hours'
+         AND el.latitude >= -90 AND el.latitude <= 90
+         AND el.longitude >= -180 AND el.longitude <= 180
        ORDER BY el.user_id, el.timestamp DESC`,
       [emergencyId]
     );
+    
+    // Log locations being returned for debugging
+    console.log(`📍 [DEBUG] getLatestLocations for emergency ${emergencyId}:`);
+    console.log(`   Found ${result.rows.length} valid locations`);
+    result.rows.forEach((loc: any, i: number) => {
+      console.log(`   Location ${i}: user_id=${loc.user_id}, lat=${loc.latitude}, lng=${loc.longitude}, timestamp=${loc.timestamp}`);
+    });
+    
     return result.rows;
   }
 }

@@ -150,12 +150,26 @@ router.post(
           });
         }
         imageUrl = getImageUrl(imageFile.filename);
+        console.log('📸 Image uploaded:', {
+          filename: imageFile.filename,
+          originalname: imageFile.originalname,
+          mimetype: imageFile.mimetype,
+          size: imageFile.size,
+          url: imageUrl,
+        });
       }
 
       // Get audio URL if file was uploaded
       let audioUrl: string | null = null;
       if (audioFile) {
         audioUrl = getAudioUrl(audioFile.filename);
+        console.log('🎵 Audio uploaded:', {
+          filename: audioFile.filename,
+          originalname: audioFile.originalname,
+          mimetype: audioFile.mimetype,
+          size: audioFile.size,
+          url: audioUrl,
+        });
       }
 
       // Get video URL if file was uploaded
@@ -168,6 +182,13 @@ router.post(
           });
         }
         videoUrl = getVideoUrl(videoFile.filename);
+        console.log('🎬 Video uploaded:', {
+          filename: videoFile.filename,
+          originalname: videoFile.originalname,
+          mimetype: videoFile.mimetype,
+          size: videoFile.size,
+          url: videoUrl,
+        });
       }
 
       // Insert message into database
@@ -215,12 +236,22 @@ router.post(
       emitToEmergency(emergencyId, 'new_message', messageData);
 
       // Include user_email and user_display_name in response for immediate frontend display
+      const responseMessage = {
+        ...savedMessage,
+        user_email: userEmail,
+        user_display_name: userDisplayName,
+      };
+      
+      console.log('📤 Sending message response:', {
+        messageId: savedMessage.id,
+        hasMessage: !!savedMessage.message,
+        imageUrl: savedMessage.image_url,
+        videoUrl: savedMessage.video_url,
+        audioUrl: savedMessage.audio_url,
+      });
+      
       res.status(201).json({
-        message: {
-          ...savedMessage,
-          user_email: userEmail,
-          user_display_name: userDisplayName,
-        },
+        message: responseMessage,
       });
     } catch (error: any) {
       console.error('Send message error:', error);

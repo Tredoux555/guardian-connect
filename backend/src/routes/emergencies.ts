@@ -72,21 +72,44 @@ router.post(
       const senderDisplayName = getUserDisplayName(senderUser);
 
       // Send notifications to all registered contacts
+      console.log(`📤 Starting notification process for ${participants.length} participant(s)...`);
+      
       for (const participant of participants) {
         if (participant && participant.userId) {
-          console.log(`📤 Sending notifications to: ${participant.userId} (${participant.name})`);
+          console.log(`\n📤 === NOTIFICATION ATTEMPT FOR: ${participant.userId} (${participant.name}) ===`);
+          
+          // Check if user has FCM token before attempting push
+          const tokenCheck = await query(
+            'SELECT fcm_token FROM users WHERE id = $1',
+            [participant.userId]
+          );
+          const hasFcmToken = tokenCheck.rows.length > 0 && 
+                             tokenCheck.rows[0].fcm_token != null &&
+                             tokenCheck.rows[0].fcm_token.toString().trim().isNotEmpty;
+          
+          console.log(`   🔑 FCM Token Status: ${hasFcmToken ? '✅ EXISTS' : '❌ MISSING'}`);
           
           // Send Firebase push notification (for mobile apps)
-          try {
-            await sendEmergencyAlert(
-              participant.userId,
-              emergency.id,
-              senderDisplayName,
-              undefined // Location will be sent when user accepts
-            );
-            console.log(`   ✅ Firebase push sent to ${participant.userId}`);
-          } catch (error) {
-            console.error(`   ❌ Failed to send Firebase alert to ${participant.userId}:`, error);
+          if (hasFcmToken) {
+            try {
+              await sendEmergencyAlert(
+                participant.userId,
+                emergency.id,
+                senderDisplayName,
+                undefined // Location will be sent when user accepts
+              );
+              console.log(`   ✅ Firebase push sent successfully to ${participant.userId}`);
+            } catch (error: any) {
+              console.error(`   ❌ FAILED to send Firebase alert to ${participant.userId}:`, error);
+              console.error(`      Error type: ${error?.constructor?.name || 'Unknown'}`);
+              console.error(`      Error message: ${error?.message || error?.toString() || 'No message'}`);
+              if (error?.stack) {
+                console.error(`      Stack: ${error.stack}`);
+              }
+            }
+          } else {
+            console.log(`   ⚠️ SKIPPING Firebase push - no FCM token for user ${participant.userId}`);
+            console.log(`      User needs to log in to register FCM token`);
           }
 
           // Send Web Push notification (for web browsers - works even when app is closed)
@@ -97,19 +120,26 @@ router.post(
               senderDisplayName
             );
             console.log(`   ✅ Web push sent to ${participant.userId}`);
-          } catch (error) {
-            console.error(`   ❌ Failed to send web push to ${participant.userId}:`, error);
+          } catch (error: any) {
+            console.error(`   ❌ Failed to send web push to ${participant.userId}:`, error?.message || error);
           }
 
           // Emit socket event (for real-time updates when app is open)
-          console.log(`   📡 Emitting socket event 'emergency_created' to user:${participant.userId}`);
-          emitToUser(participant.userId, 'emergency_created', {
-            emergencyId: emergency.id,
-            userId,
-            userEmail: senderUser.email,
-            senderName: senderDisplayName,
-            participants: participants.length,
-          });
+          try {
+            console.log(`   📡 Emitting socket event 'emergency_created' to user:${participant.userId}`);
+            emitToUser(participant.userId, 'emergency_created', {
+              emergencyId: emergency.id,
+              userId,
+              userEmail: senderUser.email,
+              senderName: senderDisplayName,
+              participants: participants.length,
+            });
+            console.log(`   ✅ Socket event emitted to user:${participant.userId}`);
+          } catch (error: any) {
+            console.error(`   ❌ Failed to emit socket event to ${participant.userId}:`, error?.message || error);
+          }
+          
+          console.log(`📤 === END NOTIFICATION ATTEMPT FOR: ${participant.userId} ===\n`);
         }
       }
       console.log(`✅ Emergency ${emergency.id} created and all notifications sent`)
@@ -464,6 +494,86 @@ router.post(
     } catch (error) {
       console.error('Cancel emergency error:', error);
       res.status(500).json({ error: 'Failed to cancel emergency' });
+    }
+  }
+);
+
+// Escalate emergency to emergency services
+router.post(
+  '/:id/escalate',
+  authenticate,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const emergencyId = req.params.id;
+      const { reason, latitude, longitude, sender_name } = req.body;
+      
+      // Get emergency
+      const emergency = await Emergency.findById(emergencyId);
+      if (!emergency) {
+        return res.status(404).json({ error: 'Emergency not found' });
+      }
+      
+      // Log escalation
+      console.log(`🚨 ESCALATION: Emergency ${emergencyId} escalated to emergency services`);
+      console.log(`   Reason: ${reason}`);
+      console.log(`   Location: ${latitude}, ${longitude}`);
+      console.log(`   Sender: ${sender_name}`);
+      
+      // TODO: Integrate with emergency services API (911, etc.)
+      // For now, just log and update emergency status
+      await Emergency.update(emergencyId, {
+        status: 'escalated',
+        escalatedAt: new Date().toISOString(),
+        escalationReason: reason,
+      });
+      
+      // Notify all participants
+      emitToEmergency(emergencyId, 'emergency_escalated', {
+        emergencyId,
+        reason,
+        escalatedAt: new Date().toISOString(),
+      });
+      
+      res.json({ 
+        message: 'Emergency escalated to emergency services',
+        escalatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Escalate emergency error:', error);
+      res.status(500).json({ error: 'Failed to escalate emergency' });
+    }
+  }
+);
+
+// Get emergency history
+router.get(
+  '/history',
+  authenticate,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const page = parseInt(req.query.page as string) || 0;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = page * limit;
+      
+      // Get emergencies where user was sender or participant
+      const result = await query(
+        `SELECT DISTINCT e.*, 
+         COUNT(DISTINCT ep.user_id) FILTER (WHERE ep.status = 'accepted') as responder_count
+         FROM emergencies e
+         LEFT JOIN emergency_participants ep ON e.id = ep.emergency_id
+         WHERE (e.user_id = $1 OR ep.user_id = $1)
+         AND e.status IN ('ended', 'cancelled', 'escalated')
+         GROUP BY e.id
+         ORDER BY e.created_at DESC
+         LIMIT $2 OFFSET $3`,
+        [userId, limit, offset]
+      );
+      
+      res.json(result.rows);
+    } catch (error) {
+      console.error('Get emergency history error:', error);
+      res.status(500).json({ error: 'Failed to get emergency history' });
     }
   }
 );

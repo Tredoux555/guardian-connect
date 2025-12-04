@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../services/location_service.dart';
 import 'emergency_active_screen.dart';
+import 'dart:convert';
 
 class EmergencyResponseScreen extends StatefulWidget {
   final String emergencyId;
-  final String senderName;
+  final String? senderName; // Optional - will be fetched if not provided
 
   const EmergencyResponseScreen({
     super.key,
     required this.emergencyId,
-    required this.senderName,
+    this.senderName,
   });
 
   @override
@@ -20,6 +22,23 @@ class EmergencyResponseScreen extends StatefulWidget {
 
 class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
   bool _isLoading = false;
+  bool _hasNavigatedAway = false;
+  Timer? _statusCheckTimer;
+  String _senderName = 'Someone'; // Default if not provided
+  
+  Future<void> _fetchEmergencyDetails() async {
+    try {
+      final response = await ApiService.get('/emergencies/${widget.emergencyId}');
+      if (response.statusCode == 200 && mounted) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          _senderName = data['user_display_name'] ?? data['user_email'] ?? 'Someone';
+        });
+      }
+    } catch (e) {
+      debugPrint('⚠️ Failed to fetch emergency details: $e');
+    }
+  }
 
   Future<void> _acceptEmergency() async {
     setState(() {
@@ -45,9 +64,21 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
       // Accept emergency
       await ApiService.post('/emergencies/${widget.emergencyId}/accept', {});
 
-      // Connect to socket and join emergency room
-      await SocketService.connect();
-      SocketService.joinEmergency(widget.emergencyId);
+      // Connect to socket and join emergency room (won't block if it fails)
+      try {
+        final socket = await SocketService.connect();
+        if (socket != null) {
+          SocketService.joinEmergency(widget.emergencyId);
+          debugPrint('✅ Joined emergency room: ${widget.emergencyId}');
+        } else {
+          debugPrint('⚠️ Socket connection failed, continuing without real-time features');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Socket connection failed, continuing without real-time features: $e');
+      }
+      
+      // Stop status polling since we're navigating away
+      _statusCheckTimer?.cancel();
 
       // Start sharing location
       _startLocationSharing();
@@ -136,6 +167,84 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _senderName = widget.senderName ?? 'Someone';
+    if (widget.senderName == null) {
+      _fetchEmergencyDetails();
+    }
+    _setupSocketListener();
+    _startStatusPolling();
+  }
+
+  @override
+  void dispose() {
+    _statusCheckTimer?.cancel();
+    super.dispose();
+  }
+
+  void _setupSocketListener() {
+    // Listen for emergency_ended event even before accepting
+    SocketService.on('emergency_ended', (data) {
+      if (_hasNavigatedAway || !mounted) return;
+      
+      final eventEmergencyId = data is Map ? data['emergencyId'] as String? : null;
+      if (eventEmergencyId == widget.emergencyId) {
+        debugPrint('🛑 Emergency ended by sender while on response screen');
+        _hasNavigatedAway = true;
+        
+        if (mounted) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Emergency has been ended by sender'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+    });
+  }
+
+  void _startStatusPolling() {
+    // Poll emergency status every 10 seconds as fallback if socket fails
+    _statusCheckTimer = Timer.periodic(const Duration(seconds: 10), (timer) async {
+      if (_hasNavigatedAway || !mounted) {
+        timer.cancel();
+        return;
+      }
+      
+      try {
+        final response = await ApiService.get('/emergencies/${widget.emergencyId}');
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final status = data['emergency']?['status'] as String?;
+          
+          if (status == 'ended' || status == 'cancelled') {
+            timer.cancel();
+            _hasNavigatedAway = true;
+            
+            if (mounted) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Emergency has been ${status}'),
+                  backgroundColor: Colors.orange,
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error checking emergency status: $e');
+        // Don't cancel timer on error - keep polling
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -164,7 +273,7 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  '${widget.senderName} needs help!',
+                  '$_senderName needs help!',
                   style: const TextStyle(
                     fontSize: 20,
                     color: Colors.red,

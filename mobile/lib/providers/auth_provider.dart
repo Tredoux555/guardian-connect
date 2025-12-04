@@ -34,13 +34,46 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
     
     try {
+      // Try to check connection, but don't block if it fails
+      // The actual login attempt will provide better error info
+      debugPrint('🔍 Checking backend connection...');
+      final isConnected = await ApiService.checkConnection();
+      if (!isConnected) {
+        debugPrint('⚠️ Health check failed, but attempting login anyway...');
+        // Don't block - try login anyway, it might work
+        // The login will provide a more specific error if it fails
+      } else {
+        debugPrint('✅ Backend is reachable');
+      }
+      
+      debugPrint('🔐 Attempting login...');
       final response = await ApiService.login(email, password);
       _user = User.fromJson(response['user']);
       _isLoading = false;
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      // Parse error message for user-friendly display
+      String errorMessage = e.toString();
+      
+      if (errorMessage.contains('Connection closed') || errorMessage.contains('SocketException')) {
+        errorMessage = 'Server connection failed. Please check if the backend is running on port 3001.';
+      } else if (errorMessage.contains('timeout') || errorMessage.contains('TimeoutException')) {
+        errorMessage = 'Request timed out. The server may be slow or unavailable.';
+      } else if (errorMessage.contains('401') || errorMessage.contains('Invalid credentials')) {
+        errorMessage = 'Invalid email or password.';
+      } else if (errorMessage.contains('403') || errorMessage.contains('verify')) {
+        errorMessage = 'Please verify your email before logging in.';
+      } else if (errorMessage.contains('Network error')) {
+        errorMessage = 'Network error: Unable to connect to server. Please check your internet connection.';
+      } else if (errorMessage.contains('HTTP error')) {
+        errorMessage = 'Server error. Please try again later.';
+      } else {
+        // Keep original error but make it more readable
+        errorMessage = errorMessage.replaceAll('Exception: ', '');
+      }
+      
+      _error = errorMessage;
       _isLoading = false;
       notifyListeners();
       return false;
@@ -53,12 +86,36 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
     
     try {
+      // Check connection first
+      final isConnected = await ApiService.checkConnection();
+      if (!isConnected) {
+        _error = 'Cannot connect to server. Please check your network connection.';
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+      
       await ApiService.register(email, password);
       _isLoading = false;
       notifyListeners();
       return true;
     } catch (e) {
-      _error = e.toString();
+      // Parse error message for user-friendly display
+      String errorMessage = e.toString();
+      
+      if (errorMessage.contains('Connection closed') || errorMessage.contains('SocketException')) {
+        errorMessage = 'Server connection failed. Please check if the backend is running.';
+      } else if (errorMessage.contains('timeout') || errorMessage.contains('TimeoutException')) {
+        errorMessage = 'Request timed out. Please try again.';
+      } else if (errorMessage.contains('already registered') || errorMessage.contains('Email already')) {
+        errorMessage = 'This email is already registered. Please log in instead.';
+      } else if (errorMessage.contains('Network error')) {
+        errorMessage = 'Network error: Unable to connect to server.';
+      } else {
+        errorMessage = errorMessage.replaceAll('Exception: ', '');
+      }
+      
+      _error = errorMessage;
       _isLoading = false;
       notifyListeners();
       return false;

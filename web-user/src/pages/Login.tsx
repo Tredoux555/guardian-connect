@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import './Login.css'
@@ -10,7 +10,16 @@ function Login() {
   const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showSplash, setShowSplash] = useState(true)
   const navigate = useNavigate()
+
+  // Hide splash screen after a brief moment
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false)
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -62,6 +71,33 @@ function Login() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Show splash screen
+  if (showSplash) {
+    return (
+      <div className="splash-screen">
+        <div className="splash-content">
+          <div className="splash-icon">🚨</div>
+          <h1 className="splash-title">Guardian Connect</h1>
+          <div className="splash-spinner"></div>
+        </div>
+      </div>
+    )
+  }
+
+  // Show loading state when submitting
+  if (loading) {
+    return (
+      <div className="login-loading">
+        <div className="login-loading-content">
+          <div className="login-loading-icon">🚨</div>
+          <p className="login-loading-text">
+            {isRegistering ? 'Registering...' : 'Logging in...'}
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (

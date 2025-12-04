@@ -1,5 +1,6 @@
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'log_collector.dart';
 
 class LocationService {
   static Future<bool> requestPermissions() async {
@@ -17,7 +18,7 @@ class LocationService {
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        print('⚠️ Location services are disabled');
+        LogCollector.logLocation('Location services are disabled', level: LogLevel.warning);
         return null;
       }
 
@@ -25,24 +26,44 @@ class LocationService {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          print('❌ Location permission denied');
+          LogCollector.logLocation('Location permission denied', level: LogLevel.error);
           return null;
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
-        print('❌ Location permission denied forever');
+        LogCollector.logLocation('Location permission denied forever', level: LogLevel.error);
         return null;
       }
 
       // OPTIMIZED: Maximum GPS accuracy
-      print('📍 Requesting location with maximum GPS accuracy...');
-      return await Geolocator.getCurrentPosition(
+      LogCollector.logLocation('Requesting location with maximum GPS accuracy');
+      final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.best, // Maximum GPS accuracy
         timeLimit: const Duration(seconds: 30), // Give GPS time for cold start
       );
+      
+      LogCollector.logLocation(
+        'Location obtained: ${position.latitude}, ${position.longitude} (accuracy: ${position.accuracy}m)',
+        level: LogLevel.info,
+        metadata: {
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'accuracy': position.accuracy,
+          'altitude': position.altitude,
+          'speed': position.speed,
+          'heading': position.heading,
+          'timestamp': position.timestamp.toIso8601String(),
+        },
+      );
+      
+      return position;
     } catch (e) {
-      print('❌ Error getting location: $e');
+      LogCollector.logError(
+        'Error getting location',
+        source: LogSource.location,
+        error: e,
+      );
       return null;
     }
   }
@@ -52,7 +73,7 @@ class LocationService {
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        print('⚠️ Location services are disabled');
+        LogCollector.logLocation('Location services are disabled', level: LogLevel.warning);
         return null;
       }
 
@@ -60,31 +81,52 @@ class LocationService {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          print('❌ Location permission denied');
+          LogCollector.logLocation('Location permission denied', level: LogLevel.error);
           return null;
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
-        print('❌ Location permission denied forever');
+        LogCollector.logLocation('Location permission denied forever', level: LogLevel.error);
         return null;
       }
 
       // MAXIMUM ACCURACY for emergencies - forces GPS usage
-      print('🚨 Requesting emergency location with best-for-navigation accuracy...');
-      return await Geolocator.getCurrentPosition(
+      LogCollector.logLocation('Requesting emergency location with best-for-navigation accuracy');
+      final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.bestForNavigation, // Best possible GPS accuracy
         timeLimit: const Duration(seconds: 30), // Give GPS time for cold start
       );
+      
+      LogCollector.logLocation(
+        'Emergency location obtained: ${position.latitude}, ${position.longitude} (accuracy: ${position.accuracy}m)',
+        level: LogLevel.info,
+        metadata: {
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'accuracy': position.accuracy,
+          'altitude': position.altitude,
+          'speed': position.speed,
+          'heading': position.heading,
+          'timestamp': position.timestamp.toIso8601String(),
+          'isEmergency': true,
+        },
+      );
+      
+      return position;
     } catch (e) {
-      print('❌ Error getting emergency location: $e');
+      LogCollector.logError(
+        'Error getting emergency location',
+        source: LogSource.location,
+        error: e,
+      );
       return null;
     }
   }
 
   // Standard location stream (good accuracy)
   static Stream<Position> getLocationStream() {
-    print('📍 Starting location stream with maximum GPS accuracy...');
+    LogCollector.logLocation('Starting location stream with maximum GPS accuracy');
     return Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.best, // Maximum GPS accuracy
@@ -95,13 +137,34 @@ class LocationService {
   }
 
   // Emergency location stream (maximum accuracy for active emergencies)
-  static Stream<Position> getEmergencyLocationStream() {
-    print('🚨 Starting emergency location stream with best-for-navigation accuracy...');
+  static Stream<Position> getEmergencyLocationStream({bool isActiveEmergency = false}) {
+    LogCollector.logLocation('Starting emergency location stream with best-for-navigation accuracy');
+    
+    // During active emergency, update more frequently
+    final distanceFilter = isActiveEmergency ? 1 : 3; // Every 1 meter during active emergency
+    
+    return Geolocator.getPositionStream(
+      locationSettings: LocationSettings(
+        accuracy: LocationAccuracy.bestForNavigation, // Best possible GPS accuracy
+        distanceFilter: distanceFilter, // Very frequent updates
+        timeLimit: const Duration(seconds: 60),
+      ),
+    ).timeout(
+      const Duration(seconds: 60),
+      onTimeout: (sink) {
+        LogCollector.logLocation('Location stream timeout - continuing with last known position', level: LogLevel.warning);
+        sink.close();
+      },
+    );
+  }
+  
+  /// Get high-frequency location stream for active emergency (updates every 1 meter)
+  static Stream<Position> getActiveEmergencyLocationStream() {
+    LogCollector.logLocation('Starting HIGH-FREQUENCY location stream for active emergency');
     return Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation, // Best possible GPS accuracy
-        distanceFilter: 3, // Update every 3 meters (very frequent for emergencies)
-        timeLimit: const Duration(seconds: 30),
+        accuracy: LocationAccuracy.bestForNavigation,
+        distanceFilter: 1, // Update every 1 meter
       ),
     );
   }

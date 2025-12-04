@@ -2,7 +2,25 @@
 
 Flutter mobile app for iOS and Android with optimized native GPS support.
 
-## Setup Instructions
+## 🚀 First Time Setup
+
+**New to this project? Start here:**
+
+👉 **[FIRST_TIME_SETUP.md](FIRST_TIME_SETUP.md)** - Complete step-by-step guide for first-time users
+
+👉 **[QUICK_START_CHECKLIST.md](QUICK_START_CHECKLIST.md)** - Quick checklist version
+
+These guides cover:
+- Installing prerequisites
+- Setting up the backend
+- Configuring network settings
+- Connecting your iPhone
+- Running the app for the first time
+- Troubleshooting common issues
+
+---
+
+## Setup Instructions (Reference)
 
 ### Prerequisites
 
