@@ -38,9 +38,11 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
   String? _currentUserId; // Store current user ID to check if sender
   String? _senderUserId; // Store sender user ID from emergency
   bool get _isSender => _currentUserId != null && _senderUserId != null && _currentUserId == _senderUserId;
-  Timer? _statusCheckTimer; // Poll emergency status as fallback
   bool _locationWarning = false; // Flag to show location accuracy warning
   List<Map<String, dynamic>> _responders = []; // List of people responding to help
+  
+  // Video call state
+  bool _isVideoCallActive = false;
   
   // Colors for responder markers (cycle through these)
   static const List<Color> _responderColors = [
@@ -73,7 +75,7 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
   void initState() {
     super.initState();
     _initializeEmergency();
-    _startStatusPolling();
+    // Real-time updates via Socket.IO - no polling needed
   }
 
   Future<void> _initializeEmergency() async {
@@ -210,44 +212,12 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
     }
   }
 
-  void _startStatusPolling() {
-    // Poll emergency status every 15 seconds as fallback if socket fails
-    _statusCheckTimer = Timer.periodic(const Duration(seconds: 15), (timer) async {
-      if (_hasNavigatedAway || !mounted) {
-        timer.cancel();
-        return;
-      }
-      
-      try {
-        final response = await ApiService.get('/emergencies/${widget.emergencyId}');
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          final status = data['emergency']?['status'] as String?;
-          
-          if (status == 'ended' || status == 'cancelled') {
-            timer.cancel();
-            debugPrint('🛑 Emergency status check: Emergency has been $status');
-            _handleEmergencyEnded();
-          }
-        } else if (response.statusCode == 404) {
-          // Emergency not found - might have been ended
-          timer.cancel();
-          debugPrint('🛑 Emergency status check: Emergency not found (likely ended)');
-          _handleEmergencyEnded();
-        }
-      } catch (e) {
-        debugPrint('⚠️ Error checking emergency status: $e');
-        // Don't cancel timer on error - keep polling
-      }
-    });
-  }
 
   void _handleEmergencyEnded() {
     if (_hasNavigatedAway || !mounted) return;
     
     // Set flag to prevent multiple navigation attempts
     _hasNavigatedAway = true;
-    _statusCheckTimer?.cancel();
     
     if (mounted) {
       // Clear the active emergency from the provider
@@ -796,6 +766,63 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
       // Update responders list
       _responders = newResponders;
     });
+  }
+
+  /// Generate a unique video call room URL based on emergency ID
+  String _getVideoCallUrl() {
+    // Use first 12 chars of emergency ID for readable room name
+    final roomId = widget.emergencyId.replaceAll('-', '').substring(0, 12);
+    return 'https://meet.jit.si/guardian-emergency-$roomId';
+  }
+  
+  /// Launch video call for all emergency participants
+  Future<void> _launchVideoCall() async {
+    final url = Uri.parse(_getVideoCallUrl());
+    
+    try {
+      setState(() => _isVideoCallActive = true);
+      
+      if (await canLaunchUrl(url)) {
+        await launchUrl(
+          url, 
+          mode: LaunchMode.externalApplication,
+        );
+        
+        // Show info snackbar
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Video call opened - all participants can join the same room'),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Could not open video call. Check your browser.'),
+              backgroundColor: Colors.red.shade600,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error launching video call: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error opening video call: $e'),
+            backgroundColor: Colors.red.shade600,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isVideoCallActive = false);
+      }
+    }
   }
 
   Future<void> _endEmergency() async {
@@ -1578,7 +1605,6 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
 
   @override
   void dispose() {
-    _statusCheckTimer?.cancel();
     _locationUpdateTimer?.cancel();
     _locationSubscription?.cancel();
     SocketService.leaveEmergency(widget.emergencyId);
@@ -1618,22 +1644,24 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
       appBar: AppBar(
         title: const Text('Active Emergency'),
         actions: [
-          // End Emergency button in app bar - ALWAYS show for easy access
-          // Backend will validate if user is authorized to end it
-          IconButton(
-            icon: const Icon(Icons.stop_circle, color: Colors.red, size: 28),
-            tooltip: 'End Emergency',
-            onPressed: _endEmergency,
-          ),
+          // End Emergency button in app bar - only show for sender
+          if (shouldShowEndButton)
+            IconButton(
+              icon: const Icon(Icons.stop_circle, color: Colors.red, size: 28),
+              tooltip: 'End Emergency',
+              onPressed: _endEmergency,
+            ),
         ],
       ),
-      // Floating action button for ending emergency - always visible
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _endEmergency,
-        backgroundColor: Colors.red,
-        icon: const Icon(Icons.stop, color: Colors.white),
-        label: const Text('END', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-      ),
+      // Floating action button for ending emergency - only show for sender
+      floatingActionButton: shouldShowEndButton
+          ? FloatingActionButton.extended(
+              onPressed: _endEmergency,
+              backgroundColor: Colors.red,
+              icon: const Icon(Icons.stop, color: Colors.white),
+              label: const Text('END', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            )
+          : null,
       floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
       body: _currentPosition == null
           ? const Center(
@@ -1933,11 +1961,41 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                           ),
                         ),
                       ),
-                    // Get Directions button (just above chat widget) - shows dialog with map options
-                    // Only show for responders, not for sender
+                    // VIDEO CALL button - available for everyone
+                    Positioned(
+                      bottom: 300, // Just above chat widget
+                      left: 20,
+                      right: 20,
+                      child: ElevatedButton.icon(
+                        onPressed: _isVideoCallActive ? null : _launchVideoCall,
+                        icon: Icon(
+                          Icons.videocam,
+                          color: _isVideoCallActive ? Colors.grey : Colors.white,
+                        ),
+                        label: Text(
+                          _isVideoCallActive ? 'OPENING...' : 'JOIN VIDEO CALL',
+                          style: TextStyle(
+                            color: _isVideoCallActive ? Colors.grey : Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isVideoCallActive 
+                              ? Colors.grey.shade300 
+                              : const Color(0xFF1976D2), // Blue
+                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          elevation: 4,
+                        ),
+                      ),
+                    ),
+                    // Get Directions button - only show for responders
                     if (shouldShowGetDirections)
                       Positioned(
-                        bottom: 300, // Just above chat widget (chat is 300px tall)
+                        bottom: 360, // Above video call button
                         left: 20,
                         right: 20,
                         child: ElevatedButton.icon(
@@ -1953,33 +2011,33 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                           ),
                         ),
                       ),
-                    // END EMERGENCY button (just above chat widget) - Always visible
-                    // Backend will validate if user is authorized to end it
-                    Positioned(
-                      bottom: 310, // Just above chat widget (chat is 300px tall)
-                      left: 20,
-                      right: 20,
-                      child: ElevatedButton.icon(
-                        onPressed: _endEmergency,
-                        icon: const Icon(Icons.stop_circle, color: Colors.white),
-                        label: const Text(
-                          'END EMERGENCY',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                    // END EMERGENCY button - only show for sender
+                    if (shouldShowEndButton)
+                      Positioned(
+                        bottom: shouldShowGetDirections ? 420 : 360, // Adjust based on whether directions shown
+                        left: 20,
+                        right: 20,
+                        child: ElevatedButton.icon(
+                          onPressed: _endEmergency,
+                          icon: const Icon(Icons.stop_circle, color: Colors.white),
+                          label: const Text(
+                            'END EMERGENCY',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
                           ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                            elevation: 4,
                           ),
-                          elevation: 4,
                         ),
                       ),
-                    ),
                     // Emergency Chat Widget (fixed at bottom)
                     Positioned(
                       bottom: 0,

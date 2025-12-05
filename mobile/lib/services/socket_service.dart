@@ -47,17 +47,18 @@ class SocketService {
       }
 
       // Create socket - DO NOT auto connect yet
+      // WebSocket-only for instant real-time communication
       _socket = IO.io(
         socketUrl,
         IO.OptionBuilder()
-            .setTransports(['polling', 'websocket'])
+            .setTransports(['websocket'])
             .setPath('/socket.io/')
             .setAuth({'token': token})
             .disableAutoConnect() // Important: don't connect until handlers are set up
             .enableReconnection()
             .setReconnectionAttempts(5)
-            .setReconnectionDelay(1000)
-            .setReconnectionDelayMax(5000)
+            .setReconnectionDelay(500)
+            .setReconnectionDelayMax(2000)
             .build(),
       );
 
@@ -104,9 +105,9 @@ class SocketService {
       // Wait for connection with timeout
       try {
         final result = await _connectionCompleter!.future.timeout(
-          const Duration(seconds: 20),
+          const Duration(seconds: 8),
           onTimeout: () {
-            debugPrint('⚠️ Socket: Connection timeout after 20s');
+            debugPrint('⚠️ Socket: Connection timeout after 8s');
             debugPrint('   Socket connected: ${_socket?.connected}');
             debugPrint('   Socket ID: ${_socket?.id}');
             _completeConnection(null);

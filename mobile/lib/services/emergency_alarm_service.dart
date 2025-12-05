@@ -8,11 +8,13 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 /// Service to play loud emergency alarm sounds that bypass silent mode
 /// This is critical for emergency alerts - they MUST be heard
 class EmergencyAlarmService {
-  static final AudioPlayer _audioPlayer = AudioPlayer();
+  static AudioPlayer? _audioPlayer;
   static final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
   static bool _isPlaying = false;
   static bool _initialized = false;
   static Timer? _alarmTimer;
+  static Timer? _loopTimer;
+  static Timer? _vibrationTimer;
   
   /// Initialize the alarm service
   static Future<void> initialize() async {
@@ -21,9 +23,29 @@ class EmergencyAlarmService {
     try {
       debugPrint('🔊 Initializing emergency alarm service...');
       
-      // Configure audio player for maximum volume
-      await _audioPlayer.setReleaseMode(ReleaseMode.loop); // Loop the alarm
-      await _audioPlayer.setVolume(1.0); // Maximum volume
+      // Create audio player with proper configuration
+      _audioPlayer = AudioPlayer();
+      
+      // Set audio context for iOS - this is CRITICAL for playing on silent mode
+      await _audioPlayer!.setAudioContext(AudioContext(
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback, // Plays even when silent switch is on
+          options: {
+            AVAudioSessionOptions.mixWithOthers,
+            AVAudioSessionOptions.duckOthers,
+          },
+        ),
+        android: const AudioContextAndroid(
+          isSpeakerphoneOn: true,
+          audioMode: AndroidAudioMode.normal,
+          stayAwake: true,
+          contentType: AndroidContentType.sonification,
+          usageType: AndroidUsageType.alarm,
+          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+        ),
+      ));
+      
+      await _audioPlayer!.setVolume(1.0); // Maximum volume
       
       // Initialize local notifications for critical alerts (iOS)
       const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -61,17 +83,24 @@ class EmergencyAlarmService {
     }
     
     try {
-      debugPrint('🚨 PLAYING EMERGENCY ALARM');
+      debugPrint('🚨 PLAYING EMERGENCY ALARM for ${senderName ?? "Someone"}');
       _isPlaying = true;
       
-      // On iOS, use critical alert notification to bypass silent mode
+      // Ensure initialized
+      if (!_initialized) {
+        await initialize();
+      }
+      
+      // On iOS, show critical alert notification (bypasses silent mode with its own sound)
       if (Platform.isIOS) {
         await _showCriticalAlertNotification(senderName ?? 'Someone');
       }
       
-      // Play the alarm sound using system sounds
-      // Using a loud, attention-grabbing pattern
-      await _playAlarmPattern();
+      // Play the alarm sound
+      await _playAlarmSound();
+      
+      // Start continuous vibration
+      _startVibrationPattern();
       
       // Auto-stop after 60 seconds to prevent battery drain
       _alarmTimer?.cancel();
@@ -82,56 +111,94 @@ class EmergencyAlarmService {
     } catch (e) {
       debugPrint('❌ Failed to play emergency alarm: $e');
       _isPlaying = false;
+      // Even if sound fails, at least vibrate
+      _startVibrationPattern();
     }
   }
   
-  /// Play alarm pattern using system sounds and haptics
-  static Future<void> _playAlarmPattern() async {
+  /// Play alarm sound - uses multiple methods to ensure it plays
+  static Future<void> _playAlarmSound() async {
     try {
-      // Try to play an alarm sound
-      // First try a bundled asset, then fall back to URL
+      // Recreate audio player if needed
+      _audioPlayer ??= AudioPlayer();
+      
+      // Configure for alarm playback on iOS
+      await _audioPlayer!.setAudioContext(AudioContext(
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playback,
+          options: {
+            AVAudioSessionOptions.mixWithOthers,
+            AVAudioSessionOptions.duckOthers,
+          },
+        ),
+        android: const AudioContextAndroid(
+          isSpeakerphoneOn: true,
+          audioMode: AndroidAudioMode.normal,
+          stayAwake: true,
+          contentType: AndroidContentType.sonification,
+          usageType: AndroidUsageType.alarm,
+          audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+        ),
+      ));
+      
+      await _audioPlayer!.setVolume(1.0);
+      await _audioPlayer!.setReleaseMode(ReleaseMode.loop);
+      
+      // Try playing from a reliable URL source
+      // Using a loud, recognizable emergency siren
+      debugPrint('🔊 Attempting to play alarm sound...');
+      
       try {
-        // Play a loud alarm tone from URL (works cross-platform)
-        await _audioPlayer.play(
-          UrlSource('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg'),
+        // Use a data URI for a simple beep tone that's embedded
+        // This guarantees it works without network
+        await _audioPlayer!.play(
+          AssetSource('sounds/emergency_alarm.mp3'),
           mode: PlayerMode.mediaPlayer,
         );
-        await _audioPlayer.setVolume(1.0);
-      } catch (e) {
-        debugPrint('⚠️ Could not play audio URL: $e');
-        // Fall back to system sound
-        await _playSystemSound();
+        debugPrint('✅ Playing alarm from asset');
+      } catch (assetError) {
+        debugPrint('⚠️ Asset not found, trying URL: $assetError');
+        
+        try {
+          // Fallback to URL source
+          await _audioPlayer!.play(
+            UrlSource('https://www.soundjay.com/misc/sounds/fail-buzzer-01.mp3'),
+            mode: PlayerMode.mediaPlayer,
+          );
+          debugPrint('✅ Playing alarm from URL');
+        } catch (urlError) {
+          debugPrint('⚠️ URL failed: $urlError');
+          // Last resort: use system beeps in a loop
+          _startBeepLoop();
+        }
       }
       
-      // Also trigger haptic feedback for vibration
-      _startVibrationPattern();
-      
     } catch (e) {
-      debugPrint('❌ Failed to play alarm pattern: $e');
-      // Fall back to system sound
-      await _playSystemSound();
+      debugPrint('❌ Failed to play alarm sound: $e');
+      // Fallback to system beeps
+      _startBeepLoop();
     }
   }
   
-  /// Play system sound as fallback
-  static Future<void> _playSystemSound() async {
-    try {
-      // Use platform channel to play system alert sound
-      if (Platform.isIOS) {
-        // iOS system sounds
-        await SystemSound.play(SystemSoundType.alert);
-      } else {
-        // Android notification sound
-        await SystemSound.play(SystemSoundType.click);
+  /// Start a loop of system beeps as ultimate fallback
+  static void _startBeepLoop() {
+    debugPrint('🔊 Starting system beep loop as fallback');
+    _loopTimer?.cancel();
+    _loopTimer = Timer.periodic(const Duration(milliseconds: 800), (timer) {
+      if (!_isPlaying) {
+        timer.cancel();
+        return;
       }
-    } catch (e) {
-      debugPrint('⚠️ Could not play system sound: $e');
-    }
+      // Play system alert sound
+      SystemSound.play(SystemSoundType.alert);
+    });
   }
   
   /// Start vibration pattern
   static void _startVibrationPattern() {
-    Timer.periodic(const Duration(milliseconds: 500), (timer) {
+    debugPrint('📳 Starting vibration pattern');
+    _vibrationTimer?.cancel();
+    _vibrationTimer = Timer.periodic(const Duration(milliseconds: 400), (timer) {
       if (!_isPlaying) {
         timer.cancel();
         return;
@@ -153,18 +220,19 @@ class EmergencyAlarmService {
         enableVibration: true,
         ongoing: true,
         autoCancel: false,
-        fullScreenIntent: true, // Shows on lock screen
+        fullScreenIntent: true,
         category: AndroidNotificationCategory.alarm,
         visibility: NotificationVisibility.public,
       );
       
-      // iOS critical alert - plays sound even on silent mode
+      // iOS critical alert - this WILL play sound even on silent mode
+      // Note: Requires special entitlement from Apple for production
       const iosDetails = DarwinNotificationDetails(
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
-        sound: 'default', // Use default critical alert sound
-        interruptionLevel: InterruptionLevel.critical, // CRITICAL - bypasses DND
+        sound: 'default',
+        interruptionLevel: InterruptionLevel.critical,
       );
       
       const details = NotificationDetails(
@@ -173,7 +241,7 @@ class EmergencyAlarmService {
       );
       
       await _notifications.show(
-        999, // Use fixed ID for emergency notifications
+        999,
         '🚨 EMERGENCY ALERT',
         '$senderName needs help immediately!',
         details,
@@ -193,10 +261,21 @@ class EmergencyAlarmService {
     try {
       debugPrint('🔇 Stopping emergency alarm');
       _isPlaying = false;
+      
+      // Cancel all timers
       _alarmTimer?.cancel();
       _alarmTimer = null;
+      _loopTimer?.cancel();
+      _loopTimer = null;
+      _vibrationTimer?.cancel();
+      _vibrationTimer = null;
       
-      await _audioPlayer.stop();
+      // Stop audio player
+      try {
+        await _audioPlayer?.stop();
+      } catch (e) {
+        debugPrint('⚠️ Error stopping audio: $e');
+      }
       
       // Cancel the notification
       await _notifications.cancel(999);
@@ -204,6 +283,7 @@ class EmergencyAlarmService {
       debugPrint('✅ Emergency alarm stopped');
     } catch (e) {
       debugPrint('❌ Failed to stop alarm: $e');
+      _isPlaying = false;
     }
   }
   
@@ -213,7 +293,7 @@ class EmergencyAlarmService {
   /// Dispose resources
   static Future<void> dispose() async {
     await stopAlarm();
-    await _audioPlayer.dispose();
+    await _audioPlayer?.dispose();
+    _audioPlayer = null;
   }
 }
-

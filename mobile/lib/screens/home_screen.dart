@@ -8,8 +8,8 @@ import '../services/socket_service.dart';
 import '../services/emergency_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/emergency_alarm_service.dart';
+import '../services/location_service.dart';
 import 'emergency_active_screen.dart';
-import 'emergency_response_screen.dart';
 import 'settings_screen.dart';
 import 'auth/login_screen.dart';
 import 'diagnostic_screen.dart';
@@ -28,7 +28,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   
   List<Map<String, dynamic>> _pendingEmergencies = [];
   bool _isCheckingPending = false;
-  int _pollCount = 0;
   Set<String> _seenEmergencyIds = {};
   bool _hasNavigatedToEmergency = false;
   bool _isCreatingEmergency = false; // Prevent double emergency creation
@@ -48,8 +47,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _setupPushNotificationHandlers();
         _checkActiveEmergency();
         _checkPendingEmergencies();
-        // Start polling for emergencies (reduced frequency - push notifications are primary)
-        _startPendingEmergencyPolling();
+        // Real-time updates via Socket.IO and push notifications - no polling needed
       }
     });
   }
@@ -94,23 +92,90 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     PushNotificationService.onNotificationTapped = (emergencyId) {
       debugPrint('🚨 Notification tapped: Emergency $emergencyId');
       if (mounted && !_hasNavigatedToEmergency) {
-        _navigateToEmergencyResponse(emergencyId);
+        // Play alarm and show dialog when tapping notification
+        EmergencyAlarmService.playEmergencyAlarm();
+        _showEmergencyAlertDialog(emergencyId, 'Someone');
       }
     };
   }
   
-  /// Navigate to emergency response screen
-  void _navigateToEmergencyResponse(String emergencyId) {
+  /// Respond directly to emergency - skip confirmation screen, go straight to map
+  Future<void> _respondToEmergencyDirectly(String emergencyId) async {
     if (_hasNavigatedToEmergency) return;
     _hasNavigatedToEmergency = true;
     
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => EmergencyResponseScreen(emergencyId: emergencyId),
-      ),
-    ).then((_) {
+    debugPrint('🚀 Responding directly to emergency: $emergencyId');
+    
+    try {
+      // Request location permission first
+      final hasPermission = await LocationService.requestPermissions();
+      if (!hasPermission && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Location permission is required to help'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        _hasNavigatedToEmergency = false;
+        return;
+      }
+
+      // Accept emergency immediately
+      debugPrint('📡 Accepting emergency...');
+      await ApiService.post('/emergencies/$emergencyId/accept', {});
+      debugPrint('✅ Emergency accepted');
+
+      // Connect to socket and join emergency room
+      try {
+        final socket = await SocketService.connect();
+        if (socket != null) {
+          SocketService.joinEmergency(emergencyId);
+          debugPrint('✅ Joined emergency room');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Socket connection failed, continuing: $e');
+      }
+
+      // Start sharing location
+      _startLocationSharingForEmergency(emergencyId);
+
+      if (!mounted) return;
+
+      // Navigate directly to active emergency screen (map with directions)
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => EmergencyActiveScreen(emergencyId: emergencyId),
+        ),
+      ).then((_) {
+        _hasNavigatedToEmergency = false;
+        _checkPendingEmergencies();
+      });
+    } catch (e) {
+      debugPrint('❌ Error responding to emergency: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error responding: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       _hasNavigatedToEmergency = false;
-      _checkPendingEmergencies();
+    }
+  }
+
+  /// Start location sharing for emergency
+  void _startLocationSharingForEmergency(String emergencyId) {
+    LocationService.getEmergencyLocationStream().listen((position) async {
+      try {
+        await ApiService.post('/emergencies/$emergencyId/location', {
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'accuracy': position.accuracy,
+        });
+      } catch (e) {
+        debugPrint('❌ Error updating location: $e');
+      }
     });
   }
   
@@ -165,10 +230,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           ElevatedButton(
             onPressed: () {
-              // Stop the alarm and navigate to emergency
+              // Stop the alarm and respond directly (go straight to map)
               EmergencyAlarmService.stopAlarm();
               Navigator.of(context).pop();
-              _navigateToEmergencyResponse(emergencyId);
+              _respondToEmergencyDirectly(emergencyId);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
@@ -214,32 +279,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
   }
 
-  void _startPendingEmergencyPolling() {
-    // Don't poll if paused or creating emergency
-    if (_pollingPaused || _isCreatingEmergency || !mounted) {
-      // Retry after a delay if paused
-      Future.delayed(const Duration(seconds: 10), () {
-        if (mounted && !_pollingPaused && !_isCreatingEmergency) {
-          _startPendingEmergencyPolling();
-        }
-      });
-      return;
-    }
-    
-    // TEMPORARY: Increased polling frequency to catch emergencies faster
-    // TODO: Reduce back to 10s/60s once push notifications are confirmed working
-    // Poll every 3 seconds for first 20 polls (1 minute), then every 15 seconds
-    // This ensures emergencies are caught within 3 seconds if push/socket fail
-    final pollInterval = _pollCount < 20 ? 3 : 15;
-    _pollCount++;
-    
-    Future.delayed(Duration(seconds: pollInterval), () {
-      if (mounted && !_pollingPaused && !_isCreatingEmergency) {
-        _checkPendingEmergencies();
-        _startPendingEmergencyPolling();
-      }
-    });
-  }
 
   Future<void> _checkPendingEmergencies() async {
     // Skip if already checking, creating emergency, or polling is paused
@@ -341,14 +380,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ElevatedButton(
             onPressed: () {
               Navigator.of(dialogContext).pop();
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => EmergencyResponseScreen(
-                    emergencyId: emergencyId,
-                    senderName: senderName,
-                  ),
-                ),
-              );
+              // Go directly to map with directions
+              _respondToEmergencyDirectly(emergencyId);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
@@ -459,15 +492,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           'Someone';
         
         if (emergencyId != null && mounted) {
-          // Navigate to emergency response screen
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => EmergencyResponseScreen(
-                emergencyId: emergencyId,
-                senderName: senderName,
-              ),
-            ),
-          );
+          // Play alarm and show dialog for new emergency
+          EmergencyAlarmService.playEmergencyAlarm(senderName: senderName);
+          _showEmergencyAlertDialog(emergencyId, senderName);
         }
       });
     } catch (e) {
@@ -705,13 +732,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _isCreatingEmergency = false;
       debugPrint('✅ Emergency creation flag reset');
       
-      // Resume polling after a short delay to avoid immediate checks
+      // Reset polling pause flag
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) {
           _pollingPaused = false;
-          debugPrint('▶️ Resuming polling after emergency creation');
-          // Restart polling if it was stopped
-          _startPendingEmergencyPolling();
+          debugPrint('▶️ Polling pause flag reset (polling removed - using real-time only)');
         }
       });
     }
@@ -719,35 +744,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // Calculate exact position to match splash screen spacing
-    // Splash screen calculates: totalTopHeight + 40 + textHeight + 30 = icon position
-    // Then text is 30px below icon
-    // For home screen, we reverse: text where icon is, icon where text is
-    final statusBarHeight = MediaQuery.of(context).padding.top;
-    final appBarHeight = AppBar().preferredSize.height;
-    final totalTopHeight = statusBarHeight + appBarHeight;
-    
-    // Match splash screen spacing exactly:
-    // - Top padding (AppBar + status bar)
-    // - SizedBox(height: 40)
-    // - Text height (fontSize 32, approximate ~40px with line height)
-    // - SizedBox(height: 30) - spacing between text and icon
-    const topSpacing = 40.0;
-    const textHeight = 40.0; // Approximate text height (fontSize 32)
-    const spacingBetweenTextAndIcon = 30.0;
-    
-    // Calculate where text should be positioned (same as splash screen icon position)
-    final textTopPosition = totalTopHeight + topSpacing;
-    // Calculate where icon should be positioned (30px below text, matching splash screen spacing)
-    final iconTopPosition = textTopPosition + textHeight + spacingBetweenTextAndIcon;
+    final screenHeight = MediaQuery.of(context).size.height;
     
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: const Text('Guardian Connect'),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: const Text(
+          'Guardian Connect',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF2D3436),
+          ),
+        ),
         actions: [
-          // Diagnostic button (always visible for debugging)
           IconButton(
-            icon: const Icon(Icons.bug_report),
+            icon: Icon(Icons.bug_report, color: Colors.grey[600]),
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
@@ -758,7 +771,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             tooltip: 'System Diagnostics',
           ),
           IconButton(
-            icon: const Icon(Icons.settings),
+            icon: Icon(Icons.settings, color: Colors.grey[600]),
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
@@ -768,22 +781,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
+            icon: Icon(Icons.logout, color: Colors.grey[600]),
             onPressed: () async {
               try {
                 final authProvider = Provider.of<AuthProvider>(context, listen: false);
                 await authProvider.logout();
                 
                 if (context.mounted) {
-                  // Use pushAndRemoveUntil to clear navigation stack and go to login
                   Navigator.of(context).pushAndRemoveUntil(
                     MaterialPageRoute(builder: (context) => const LoginScreen()),
-                    (route) => false, // Remove all previous routes
+                    (route) => false,
                   );
                 }
               } catch (e) {
                 debugPrint('Logout error: $e');
-                // Even if logout fails, clear tokens and navigate
                 await ApiService.clearTokens();
                 if (context.mounted) {
                   Navigator.of(context).pushAndRemoveUntil(
@@ -796,113 +807,217 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          // Position text at calculated position (matching splash screen spacing)
-          Positioned(
-            top: textTopPosition,
-            left: 0,
-            right: 0,
-            child: const Center(
-              child: Text(
-                'Emergency Alert',
-                style: TextStyle(
-                  fontSize: 32, // Match splash screen text size
-                  fontWeight: FontWeight.bold,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Top spacer - positions content at ~1/3 from top (following the rule of thirds)
+            SizedBox(height: screenHeight * 0.12),
+            
+            // Main content
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Title text
+                    const Text(
+                      'Emergency Alert',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF2D3436),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 8),
+                    
+                    Text(
+                      'Press and hold to alert your contacts',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                    
+                    // Spacer to push button to 1/3 position
+                    SizedBox(height: screenHeight * 0.06),
+                    
+                    // Show pending emergencies if any
+                    if (_pendingEmergencies.isNotEmpty) ...[
+                      Container(
+                        constraints: const BoxConstraints(maxWidth: 500),
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 32),
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.orange.shade50,
+                              Colors.orange.shade100.withOpacity(0.5),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          border: Border.all(
+                            color: Colors.orange.shade300,
+                            width: 1.5,
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.orange.withOpacity(0.15),
+                              blurRadius: 20,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.shade400,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    Icons.warning_amber_rounded,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Pending Alerts',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.orange.shade800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            ..._pendingEmergencies.map((emergency) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: ElevatedButton(
+                                  onPressed: () {
+                                    // Go directly to map with directions
+                                    _respondToEmergencyDirectly(emergency['id'] as String);
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.orange.shade600,
+                                    foregroundColor: Colors.white,
+                                    minimumSize: const Size(double.infinity, 52),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    elevation: 0,
+                                  ),
+                                  child: Text(
+                                    'Respond to ${emergency['sender_display_name'] ?? emergency['sender_email'] ?? 'Emergency'}',
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    ],
+                    
+                    // Emergency button with Consumer - centered
+                    Center(
+                      child: Consumer<EmergencyProvider>(
+                        builder: (context, emergencyProvider, _) {
+                        if (emergencyProvider.activeEmergency != null) {
+                          return Container(
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade50,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.green.shade200,
+                                width: 2,
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.check_circle,
+                                  size: 60,
+                                  color: Colors.green.shade600,
+                                ),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  'Emergency Active',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF2D3436),
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (context) => EmergencyActiveScreen(
+                                          emergencyId: emergencyProvider.activeEmergency!.id,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green.shade600,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 32,
+                                      vertical: 14,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'View Active Emergency',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        
+                        return _EmergencyButton(
+                          isCreatingEmergency: _isCreatingEmergency,
+                          onTriggerEmergency: _triggerEmergency,
+                        );
+                      },
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 40),
+                  ],
                 ),
               ),
             ),
-          ),
-          // Position icon/button at calculated position (matching splash screen)
-          Positioned(
-            top: iconTopPosition,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Column(
-                children: [
-                  // Show pending emergencies if any (above button)
-                  if (_pendingEmergencies.isNotEmpty) ...[
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 20),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade50,
-                        border: Border.all(color: Colors.orange, width: 2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            '⚠️ Pending Emergency Alerts',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.orange,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          ..._pendingEmergencies.map((emergency) {
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: ElevatedButton(
-                                onPressed: () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (context) => EmergencyResponseScreen(
-                                        emergencyId: emergency['id'] as String,
-                                        senderName: (emergency['sender_display_name'] as String?) ?? 
-                                                    (emergency['sender_email'] as String?) ?? 
-                                                    'Someone',
-                                      ),
-                                    ),
-                                  );
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.orange,
-                                  minimumSize: const Size(double.infinity, 50),
-                                ),
-                                child: Text(
-                                  'Respond to ${emergency['sender_display_name'] ?? emergency['sender_email'] ?? 'Emergency'}',
-                                  style: const TextStyle(color: Colors.white, fontSize: 16),
-                                ),
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
-                    ),
-                  ],
-                  // Emergency button - same size as splash screen icon (200x200 container, 100px icon)
-                  Consumer<EmergencyProvider>(
-                    builder: (context, emergencyProvider, _) {
-                      if (emergencyProvider.activeEmergency != null) {
-                        return ElevatedButton(
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => EmergencyActiveScreen(
-                                  emergencyId: emergencyProvider.activeEmergency!.id,
-                                ),
-                              ),
-                            );
-                          },
-                          child: const Text('View Active Emergency'),
-                        );
-                      }
-                      
-                      return _EmergencyButton(
-                        isCreatingEmergency: _isCreatingEmergency,
-                        onTriggerEmergency: _triggerEmergency,
-                      );
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -921,78 +1036,246 @@ class _EmergencyButton extends StatefulWidget {
   State<_EmergencyButton> createState() => _EmergencyButtonState();
 }
 
-class _EmergencyButtonState extends State<_EmergencyButton> {
+class _EmergencyButtonState extends State<_EmergencyButton> 
+    with SingleTickerProviderStateMixin {
   bool _isPressed = false;
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    )..repeat(reverse: true);
+    
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.08).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) {
-        setState(() {
-          _isPressed = true;
-        });
-      },
-      onTapUp: (_) {
-        setState(() {
-          _isPressed = false;
-        });
-      },
-      onTapCancel: () {
-        setState(() {
-          _isPressed = false;
-        });
-      },
-      onLongPress: widget.isCreatingEmergency ? null : () {
-        _showEmergencyConfirmation(context);
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 100),
-        width: 200,
-        height: 200,
-        decoration: BoxDecoration(
-          color: widget.isCreatingEmergency 
-              ? Colors.grey 
-              : (_isPressed ? Colors.red.shade700 : const Color(0xFFE53935)),
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: widget.isCreatingEmergency 
-                  ? Colors.grey.withOpacity(0.3)
-                  : Colors.red.withOpacity(0.3),
-              blurRadius: 20,
-              spreadRadius: 5,
+    return Column(
+      children: [
+        // The emergency button with pulse animation
+        AnimatedBuilder(
+          animation: _pulseAnimation,
+          builder: (context, child) {
+            return Transform.scale(
+              scale: widget.isCreatingEmergency ? 1.0 : _pulseAnimation.value,
+              child: child,
+            );
+          },
+          child: GestureDetector(
+            onTapDown: (_) {
+              setState(() => _isPressed = true);
+            },
+            onTapUp: (_) {
+              setState(() => _isPressed = false);
+            },
+            onTapCancel: () {
+              setState(() => _isPressed = false);
+            },
+            onLongPress: widget.isCreatingEmergency ? null : () {
+              _showEmergencyConfirmation(context);
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: widget.isCreatingEmergency 
+                    ? LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Colors.grey.shade400, Colors.grey.shade500],
+                      )
+                    : LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: _isPressed 
+                            ? [const Color(0xFFC62828), const Color(0xFFB71C1C)]
+                            : [const Color(0xFFEF5350), const Color(0xFFE53935), const Color(0xFFD32F2F)],
+                      ),
+                boxShadow: [
+                  // Outer glow
+                  BoxShadow(
+                    color: widget.isCreatingEmergency 
+                        ? Colors.grey.withOpacity(0.3)
+                        : Colors.red.withOpacity(0.4),
+                    blurRadius: 30,
+                    spreadRadius: 8,
+                  ),
+                  // Inner shadow for depth
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 15,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Inner circle highlight
+                  Positioned(
+                    top: 15,
+                    child: Container(
+                      width: 120,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(60),
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.white.withOpacity(0.25),
+                            Colors.white.withOpacity(0.0),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Icon
+                  Icon(
+                    Icons.emergency,
+                    size: 90,
+                    color: Colors.white.withOpacity(widget.isCreatingEmergency ? 0.7 : 1.0),
+                  ),
+                ],
+              ),
             ),
-          ],
+          ),
         ),
-        child: const Icon(
-          Icons.emergency,
-          size: 100,
-          color: Colors.white,
+        
+        const SizedBox(height: 24),
+        
+        // "Hold to activate" hint
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade200,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.touch_app,
+                size: 18,
+                color: Colors.grey.shade600,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Hold to activate',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey.shade700,
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
   void _showEmergencyConfirmation(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Trigger Emergency?'),
-        content: const Text('This will alert all your emergency contacts. Are you sure?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.of(context).pop();
-              await widget.onTriggerEmergency(context);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.shade100,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                Icons.warning_amber_rounded,
+                color: Colors.red.shade700,
+                size: 24,
+              ),
             ),
-            child: const Text('Yes, Alert Now'),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Trigger Emergency?',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'This will immediately alert all your emergency contacts with your location.',
+          style: TextStyle(
+            fontSize: 15,
+            height: 1.5,
+          ),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: BorderSide(color: Colors.grey.shade300),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      color: Colors.grey.shade700,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    Navigator.of(dialogContext).pop();
+                    await widget.onTriggerEmergency(context);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFE53935),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Alert Now',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

@@ -50,64 +50,130 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Calculate exact position to match home screen
-    // Home screen has: AppBar + SizedBox(40) + "Emergency Alert" text + SizedBox(30) + icon
-    final statusBarHeight = MediaQuery.of(context).padding.top;
-    final appBarHeight = AppBar().preferredSize.height;
-    final totalTopHeight = statusBarHeight + appBarHeight;
-    
-    // Match home screen spacing:
-    // - Top padding (AppBar + status bar)
-    // - SizedBox(height: 40)
-    // - "Emergency Alert" text (fontSize: 24, approximate height ~32px with line height)
-    // - SizedBox(height: 30)
-    // Then icon starts at same position
-    const emergencyTextHeight = 32.0; // Approximate text height
-    const spacingBeforeIcon = 40.0 + emergencyTextHeight + 30.0;
-    final iconTopPosition = totalTopHeight + spacingBeforeIcon;
+    final screenHeight = MediaQuery.of(context).size.height;
     
     return Scaffold(
-      backgroundColor: const Color(0xFFE53935),
-      body: Stack(
-        children: [
-          // Position icon at exact same spot as home screen emergency button
-          Positioned(
-            top: iconTopPosition,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Column(
-                children: [
-                  // Icon - same size as home screen button (200x200 container, 100px icon)
-                  Container(
-                    width: 200,
-                    height: 200,
-                    alignment: Alignment.center,
-                    child: const Icon(
-                      Icons.emergency,
-                      size: 100,
-                      color: Colors.white,
-                    ),
-                  ),
-                  // Text positioned below icon
-                  const SizedBox(height: 30),
-                  const Text(
-                    'Guardian Connect',
-                    style: TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 48),
-                  const CircularProgressIndicator(
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
-                ],
-              ),
-            ),
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        // Rich gradient background
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFD32F2F), // Deep red
+              Color(0xFFE53935), // Primary red
+              Color(0xFFEF5350), // Lighter red accent
+            ],
+            stops: [0.0, 0.5, 1.0],
           ),
-        ],
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Top spacer - positions content at ~1/3 from top
+              SizedBox(height: screenHeight * 0.22),
+              
+              // Main content area
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Emergency icon with glow effect
+                    Container(
+                      width: 180,
+                      height: 180,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white.withOpacity(0.15),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.2),
+                            blurRadius: 30,
+                            spreadRadius: 5,
+                          ),
+                          BoxShadow(
+                            color: Colors.white.withOpacity(0.1),
+                            blurRadius: 60,
+                            spreadRadius: 20,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.emergency,
+                        size: 90,
+                        color: Colors.white,
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 40),
+                    
+                    // App title
+                    const Text(
+                      'Guardian Connect',
+                      style: TextStyle(
+                        fontSize: 34,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        letterSpacing: 1.2,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black26,
+                            blurRadius: 10,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 12),
+                    
+                    // Tagline
+                    Text(
+                      'Your safety, one tap away',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w400,
+                        color: Colors.white.withOpacity(0.85),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    
+                    const Spacer(),
+                    
+                    // Loading indicator at bottom
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 60),
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            width: 32,
+                            height: 32,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white.withOpacity(0.9),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Loading...',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.white.withOpacity(0.7),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -85,8 +85,6 @@ class _EmergencyChatState extends State<EmergencyChat> {
   bool _isRecording = false;
   int _recordingDuration = 0;
   Timer? _recordingTimer;
-  Timer? _messagePollTimer; // Poll messages when socket isn't connected
-  bool _socketConnected = false; // Track socket connection state
   
   @override
   void initState() {
@@ -94,7 +92,7 @@ class _EmergencyChatState extends State<EmergencyChat> {
     _loadMessages();
     _setupSocketListener();
     _joinEmergencyRoom();
-    _startMessagePolling(); // Start polling for messages
+    // Real-time updates via Socket.IO - no polling needed
     
     // Listen to text changes to update send button state
     _messageController.addListener(() {
@@ -132,7 +130,6 @@ class _EmergencyChatState extends State<EmergencyChat> {
     _scrollController.dispose();
     _audioRecorder.dispose();
     _recordingTimer?.cancel();
-    _messagePollTimer?.cancel();
     super.dispose();
   }
 
@@ -206,63 +203,6 @@ class _EmergencyChatState extends State<EmergencyChat> {
     }
   }
   
-  // Start polling for messages when socket isn't connected
-  void _startMessagePolling() {
-    // Check socket connection status
-    SocketService.on('connect', (_) {
-      if (mounted) {
-        setState(() {
-          _socketConnected = true;
-        });
-        _messagePollTimer?.cancel(); // Stop polling when socket connects
-        debugPrint('✅ Socket connected - stopping message polling');
-      }
-    });
-
-    SocketService.on('disconnect', (_) {
-      if (mounted) {
-        setState(() {
-          _socketConnected = false;
-        });
-        _startMessagePolling(); // Restart polling when socket disconnects
-        debugPrint('⚠️ Socket disconnected - starting message polling');
-      }
-    });
-
-    // Check initial socket state
-    SocketService.connect().then((socket) {
-      if (!mounted) return; // Check mounted before proceeding
-      
-      if (socket != null && socket.connected) {
-        if (mounted) {
-          setState(() {
-            _socketConnected = true;
-          });
-        }
-      } else {
-        // Socket not connected, start polling
-        if (mounted) {
-          setState(() {
-            _socketConnected = false;
-          });
-        }
-        _messagePollTimer?.cancel();
-        // Poll every 5 seconds as fallback when socket isn't connected (faster than 10s)
-        _messagePollTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-          if (!mounted) { // Check mounted before proceeding
-            timer.cancel();
-            return;
-          }
-          if (!_socketConnected) {
-            debugPrint('🔄 Polling for new messages (socket not connected)');
-            _loadMessages();
-          } else {
-            timer.cancel();
-          }
-        });
-      }
-    });
-  }
 
   void _setupSocketListener() {
     SocketService.on('new_message', (data) {

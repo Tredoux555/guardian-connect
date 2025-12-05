@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
@@ -23,8 +24,42 @@ class EmergencyResponseScreen extends StatefulWidget {
 class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
   bool _isLoading = false;
   bool _hasNavigatedAway = false;
-  Timer? _statusCheckTimer;
   String _senderName = 'Someone'; // Default if not provided
+  bool _isVideoCallLoading = false;
+  
+  /// Generate a unique video call room URL based on emergency ID
+  String _getVideoCallUrl() {
+    final roomId = widget.emergencyId.replaceAll('-', '').substring(0, 12);
+    return 'https://meet.jit.si/guardian-emergency-$roomId';
+  }
+  
+  /// Launch video call
+  Future<void> _launchVideoCall() async {
+    final url = Uri.parse(_getVideoCallUrl());
+    
+    try {
+      setState(() => _isVideoCallLoading = true);
+      
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not open video call'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error launching video call: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isVideoCallLoading = false);
+      }
+    }
+  }
   
   Future<void> _fetchEmergencyDetails() async {
     try {
@@ -76,9 +111,6 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
       } catch (e) {
         debugPrint('⚠️ Socket connection failed, continuing without real-time features: $e');
       }
-      
-      // Stop status polling since we're navigating away
-      _statusCheckTimer?.cancel();
 
       // Start sharing location
       _startLocationSharing();
@@ -174,12 +206,11 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
       _fetchEmergencyDetails();
     }
     _setupSocketListener();
-    _startStatusPolling();
+    // Real-time updates via Socket.IO - no polling needed
   }
 
   @override
   void dispose() {
-    _statusCheckTimer?.cancel();
     super.dispose();
   }
 
@@ -207,42 +238,6 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
     });
   }
 
-  void _startStatusPolling() {
-    // Poll emergency status every 10 seconds as fallback if socket fails
-    _statusCheckTimer = Timer.periodic(const Duration(seconds: 10), (timer) async {
-      if (_hasNavigatedAway || !mounted) {
-        timer.cancel();
-        return;
-      }
-      
-      try {
-        final response = await ApiService.get('/emergencies/${widget.emergencyId}');
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          final status = data['emergency']?['status'] as String?;
-          
-          if (status == 'ended' || status == 'cancelled') {
-            timer.cancel();
-            _hasNavigatedAway = true;
-            
-            if (mounted) {
-              Navigator.of(context).pop();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Emergency has been ${status}'),
-                  backgroundColor: Colors.orange,
-                  duration: const Duration(seconds: 3),
-                ),
-              );
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('⚠️ Error checking emergency status: $e');
-        // Don't cancel timer on error - keep polling
-      }
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -283,42 +278,83 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
                 const SizedBox(height: 48),
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton(
+                  child: ElevatedButton.icon(
                     onPressed: _isLoading ? null : _acceptEmergency,
+                    icon: const Icon(Icons.check_circle, color: Colors.white),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
-                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                    child: _isLoading
+                    label: _isLoading
                         ? const SizedBox(
                             height: 20,
                             width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
                         : const Text(
                             'I CAN HELP',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
                           ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+                // Video Call Button
                 SizedBox(
                   width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: _isLoading ? null : _rejectEmergency,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 20),
-                      side: const BorderSide(color: Colors.grey),
+                  child: ElevatedButton.icon(
+                    onPressed: _isVideoCallLoading ? null : _launchVideoCall,
+                    icon: Icon(
+                      Icons.videocam,
+                      color: _isVideoCallLoading ? Colors.grey : Colors.white,
                     ),
-                    child: const Text(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isVideoCallLoading 
+                          ? Colors.grey.shade300 
+                          : const Color(0xFF1976D2),
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    label: Text(
+                      _isVideoCallLoading ? 'OPENING...' : 'JOIN VIDEO CALL',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: _isVideoCallLoading ? Colors.grey : Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _isLoading ? null : _rejectEmergency,
+                    icon: Icon(Icons.close, color: Colors.grey.shade600),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      side: BorderSide(color: Colors.grey.shade400),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    label: Text(
                       'UNAVAILABLE',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: Colors.grey,
+                        color: Colors.grey.shade600,
                       ),
                     ),
                   ),

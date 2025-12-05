@@ -11,14 +11,13 @@ export const initializeSocket = (httpServer: HTTPServer) => {
       credentials: true,
       allowedHeaders: ['Content-Type', 'Authorization'],
     },
-    // CRITICAL: Start with polling, then upgrade to websocket
-    // This is more reliable through Railway/proxies
-    transports: ['polling', 'websocket'],
-    allowUpgrades: true, // Allow upgrade from polling to websocket
-    upgradeTimeout: 30000, // Give more time for upgrade
+    // WebSocket first for instant real-time communication, polling as fallback
+    transports: ['websocket', 'polling'],
+    allowUpgrades: true, // Allow fallback to polling if websocket fails
+    upgradeTimeout: 10000, // 10 seconds for upgrade
     pingTimeout: 60000, // 60 seconds ping timeout
     pingInterval: 25000, // Ping every 25 seconds
-    connectTimeout: 45000, // 45 seconds to connect
+    connectTimeout: 15000, // 15 seconds to connect
     allowEIO3: true, // Support older clients
     // Path must match what client uses
     path: '/socket.io/',
@@ -105,7 +104,7 @@ export const initializeSocket = (httpServer: HTTPServer) => {
     });
   });
 
-  console.log('✅ Socket.io initialized (polling → websocket)');
+  console.log('✅ Socket.io initialized (websocket → polling fallback)');
 };
 
 export const emitToEmergency = (
