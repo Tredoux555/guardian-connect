@@ -162,6 +162,55 @@ if (_currentUserId != null &&
 
 ---
 
+### 8. ✅ Emergency Alarm Sound (NEW)
+**Problem**: Emergency notifications didn't play any sound, especially when phone is on silent mode.
+
+**Fix**: Implemented comprehensive emergency alarm system:
+1. Created `EmergencyAlarmService` with:
+   - iOS audio context set to `AVAudioSessionCategory.playback` (bypasses silent mode)
+   - Android audio set to alarm usage type
+   - Local alarm sound asset (`emergency_alarm.mp3`)
+   - Fallback to URL source, then system beeps
+   - Continuous vibration pattern
+   - Critical alert notifications for iOS
+
+2. iOS Configuration:
+   - Added `critical-alerts` entitlement
+   - Added `audio` background mode
+   - Request critical alert permissions
+
+**Files**: 
+- `mobile/lib/services/emergency_alarm_service.dart` (new/rewritten)
+- `mobile/pubspec.yaml` (added audioplayers, flutter_local_notifications)
+- `mobile/assets/sounds/emergency_alarm.mp3` (new)
+- `mobile/ios/Runner/Runner.entitlements` (added critical-alerts)
+- `mobile/ios/Runner/Info.plist` (added audio background mode)
+
+---
+
+### 9. ✅ Direct Response to Emergency (NEW)
+**Problem**: Clicking "Respond Now" showed an unnecessary confirmation screen ("I Can Help" / "Reject").
+
+**Fix**: Removed intermediate screen - now goes directly to map with directions:
+1. Created `_respondToEmergencyDirectly()` method that:
+   - Requests location permission
+   - Accepts emergency via API
+   - Connects to socket and joins room
+   - Starts location sharing
+   - Navigates directly to `EmergencyActiveScreen` (map)
+
+2. Updated all emergency response points:
+   - Alert dialog "RESPOND NOW" button
+   - Pending emergency buttons
+   - Socket emergency events
+   - Notification tap handler
+
+**Files**: 
+- `mobile/lib/screens/home_screen.dart` (major changes)
+- Removed use of `EmergencyResponseScreen` from home screen flow
+
+---
+
 ## Files Modified
 
 ### Mobile App
