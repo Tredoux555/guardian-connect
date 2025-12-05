@@ -1961,80 +1961,172 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                           ),
                         ),
                       ),
-                    // VIDEO CALL button - available for everyone
+                    // VIDEO CALL button - available for everyone (modern style)
                     Positioned(
-                      bottom: 300, // Just above chat widget
+                      bottom: 300,
                       left: 20,
                       right: 20,
-                      child: ElevatedButton.icon(
-                        onPressed: _isVideoCallActive ? null : _launchVideoCall,
-                        icon: Icon(
-                          Icons.videocam,
-                          color: _isVideoCallActive ? Colors.grey : Colors.white,
-                        ),
-                        label: Text(
-                          _isVideoCallActive ? 'OPENING...' : 'JOIN VIDEO CALL',
-                          style: TextStyle(
-                            color: _isVideoCallActive ? Colors.grey : Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _isVideoCallActive 
-                              ? Colors.grey.shade300 
-                              : const Color(0xFF1976D2), // Blue
+                      child: GestureDetector(
+                        onTap: _isVideoCallActive ? null : _launchVideoCall,
+                        child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
+                          decoration: BoxDecoration(
+                            gradient: _isVideoCallActive 
+                                ? null
+                                : const LinearGradient(
+                                    colors: [Color(0xFF8B5CF6), Color(0xFF7C3AED)],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                            color: _isVideoCallActive ? Colors.grey.shade300 : null,
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: _isVideoCallActive ? null : [
+                              BoxShadow(
+                                color: const Color(0xFF8B5CF6).withOpacity(0.4),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
                           ),
-                          elevation: 4,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: _isVideoCallActive 
+                                      ? Colors.grey.shade400
+                                      : Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(
+                                  Icons.videocam_rounded,
+                                  color: _isVideoCallActive ? Colors.grey.shade600 : Colors.white,
+                                  size: 22,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                _isVideoCallActive ? 'Opening...' : 'Join Video Call',
+                                style: TextStyle(
+                                  color: _isVideoCallActive ? Colors.grey.shade600 : Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                    // Get Directions button - only show for responders
+                    // Get Directions button - only show for responders (modern style)
                     if (shouldShowGetDirections)
                       Positioned(
-                        bottom: 360, // Above video call button
+                        bottom: 360,
                         left: 20,
                         right: 20,
-                        child: ElevatedButton.icon(
-                          onPressed: _showMapSelectionDialog,
-                          icon: const Icon(Icons.directions, color: Colors.white),
-                          label: const Text(
-                            'Get Directions',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4285F4), // Google Maps blue
-                            padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: GestureDetector(
+                          onTap: _showMapSelectionDialog,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF3B82F6).withOpacity(0.4),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    Icons.directions_rounded,
+                                    color: Colors.white,
+                                    size: 22,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                const Text(
+                                  'Get Directions',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 16,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    // END EMERGENCY button - only show for sender
+                    // END EMERGENCY button - only show for sender (modern style)
                     if (shouldShowEndButton)
                       Positioned(
-                        bottom: shouldShowGetDirections ? 420 : 360, // Adjust based on whether directions shown
+                        bottom: shouldShowGetDirections ? 430 : 360,
                         left: 20,
                         right: 20,
-                        child: ElevatedButton.icon(
-                          onPressed: _endEmergency,
-                          icon: const Icon(Icons.stop_circle, color: Colors.white),
-                          label: const Text(
-                            'END EMERGENCY',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
+                        child: GestureDetector(
+                          onTap: _endEmergency,
+                          child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFFEF4444), Color(0xFFDC2626)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFEF4444).withOpacity(0.4),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
                             ),
-                            elevation: 4,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    Icons.stop_circle_rounded,
+                                    color: Colors.white,
+                                    size: 22,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                const Text(
+                                  'End Emergency',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 16,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),

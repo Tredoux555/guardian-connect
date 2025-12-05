@@ -843,87 +843,145 @@ class _EmergencyChatState extends State<EmergencyChat> {
               ),
             ),
           
-          // Input area
+          // Input area - Modern design with color-coded action buttons
           Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: Colors.grey[50],
+              color: Colors.white,
               border: Border(
-                top: BorderSide(color: Colors.grey[300]!),
+                top: BorderSide(color: Colors.grey.shade200),
               ),
             ),
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                // Image button
-                IconButton(
-                  icon: const Icon(Icons.image),
-                  onPressed: _sending ? null : _pickImage,
-                  tooltip: 'Add photo',
-                ),
-                // Video button
-                IconButton(
-                  icon: const Icon(Icons.videocam),
-                  onPressed: _sending ? null : _pickVideo,
-                  tooltip: 'Add video',
-                ),
-                // Voice button
-                IconButton(
-                  icon: Icon(_isRecording ? Icons.stop : Icons.mic),
-                  color: _isRecording ? Colors.red : null,
-                  onPressed: _sending 
-                      ? null 
-                      : (_isRecording ? _stopRecording : _startRecording),
-                  tooltip: _isRecording ? 'Stop recording' : 'Record voice',
-                ),
-                // Text input
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    decoration: const InputDecoration(
-                      hintText: 'Type a message...',
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12),
+                // Quick action buttons with labels
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildActionButton(
+                      icon: Icons.camera_alt_rounded,
+                      label: 'Photo',
+                      color: const Color(0xFF3B82F6), // Blue
+                      onTap: _sending ? null : _pickImage,
                     ),
-                    maxLines: null,
-                    enabled: !_sending,
-                  ),
+                    _buildActionButton(
+                      icon: Icons.videocam_rounded,
+                      label: 'Video',
+                      color: const Color(0xFF8B5CF6), // Purple
+                      onTap: _sending ? null : _pickVideo,
+                    ),
+                    _buildActionButton(
+                      icon: _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+                      label: _isRecording ? 'Stop' : 'Voice',
+                      color: _isRecording ? const Color(0xFFEF4444) : const Color(0xFFF97316), // Red when recording, Orange otherwise
+                      onTap: _sending ? null : (_isRecording ? _stopRecording : _startRecording),
+                      isActive: _isRecording,
+                    ),
+                  ],
                 ),
-                // Send button
-                IconButton(
-                  icon: _sending
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.send),
-                  onPressed: () {
-                    // Always log when button is tapped, even if disabled
-                    final textEmpty = _messageController.text.trim().isEmpty;
-                    final hasMedia = _selectedImage != null || _selectedVideo != null || _audioPath != null;
-                    final isDisabled = _sending || (textEmpty && !hasMedia);
-                    
-                    debugPrint('📤 Send button tapped');
-                    debugPrint('   _sending: $_sending');
-                    debugPrint('   textEmpty: $textEmpty');
-                    debugPrint('   text: "${_messageController.text.trim()}"');
-                    debugPrint('   hasMedia: $hasMedia');
-                    debugPrint('   isDisabled: $isDisabled');
-                    
-                    if (isDisabled) {
-                      debugPrint('⚠️ Send button is disabled - not calling _sendMessage()');
-                      return;
-                    }
-                    
-                    debugPrint('✅ Send button enabled - calling _sendMessage()');
-                    _sendMessage();
-                  },
-                  tooltip: 'Send message',
+                
+                const SizedBox(height: 12),
+                
+                // Text input with send button
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: TextField(
+                          controller: _messageController,
+                          decoration: InputDecoration(
+                            hintText: 'Type a message...',
+                            hintStyle: TextStyle(color: Colors.grey.shade500),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          ),
+                          maxLines: null,
+                          enabled: !_sending,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Send button
+                    Container(
+                      decoration: BoxDecoration(
+                        color: (_messageController.text.trim().isNotEmpty || 
+                                _selectedImage != null || 
+                                _selectedVideo != null || 
+                                _audioPath != null)
+                            ? const Color(0xFFEF4444) // Red
+                            : Colors.grey.shade300,
+                        shape: BoxShape.circle,
+                      ),
+                      child: IconButton(
+                        icon: _sending
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.send_rounded, color: Colors.white),
+                        onPressed: _sending ? null : _sendMessage,
+                        tooltip: 'Send message',
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+  
+  /// Build a styled action button with icon and label
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    VoidCallback? onTap,
+    bool isActive = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: isActive ? color : color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: color.withOpacity(0.3),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: isActive ? Colors.white : color,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: isActive ? Colors.white : color,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
