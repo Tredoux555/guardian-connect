@@ -1,84 +1,11 @@
 import axios from 'axios'
 
-// Auto-detect API URL based on current hostname
-// Updated: Added Railway domain detection and improved console logging
-// If accessed from network IP (e.g., 192.168.1.3:3003), use same IP for API
-// If accessed from ngrok (HTTPS), use network IP for backend (HTTP)
-// If accessed from Railway (HTTPS), use VITE_API_URL or construct from hostname
-// If accessed from localhost, use localhost for API
-const getApiBaseUrl = (): string => {
-  // Use explicit VITE_API_URL if set (and not localhost)
-  if (import.meta.env.VITE_API_URL && !import.meta.env.VITE_API_URL.includes('localhost')) {
-    let apiUrl = import.meta.env.VITE_API_URL;
-    // Ensure URL has protocol (https:// or http://)
-    if (!apiUrl.startsWith('http://') && !apiUrl.startsWith('https://')) {
-      // If on Railway or HTTPS context, use https, otherwise http
-      const protocol = window.location.protocol === 'https:' ? 'https://' : 'http://';
-      apiUrl = protocol + apiUrl;
-      console.warn('⚠️ VITE_API_URL missing protocol, added:', protocol);
-    }
-    console.log('✅ Using VITE_API_URL:', apiUrl);
-    return apiUrl;
-  }
-  
-  // Auto-detect: if we're on a network IP, use that IP for API
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  const port = '3001'; // Backend port
-  const networkIP = '192.168.1.3'; // Server's network IP
-  
-  // If accessed via Railway (production)
-  if (hostname.includes('.railway.app') || hostname.includes('.up.railway.app')) {
-    // On Railway, we MUST use VITE_API_URL - can't auto-detect backend URL
-    // If VITE_API_URL is not set, show clear error and try to construct from common pattern
-    if (!import.meta.env.VITE_API_URL || import.meta.env.VITE_API_URL.includes('localhost')) {
-      console.error('❌ ERROR: On Railway but VITE_API_URL is not set or points to localhost!');
-      console.error('❌ Please set VITE_API_URL in Railway → Frontend Service → Variables');
-      console.error('❌ Value should be: https://your-backend-url.railway.app/api');
-      
-      // Try to construct backend URL from frontend URL pattern (common Railway pattern)
-      // If frontend is: dynamic-hope-production-2e52.up.railway.app
-      // Backend might be: overflowing-reprieve-production-4619.up.railway.app
-      // But we can't reliably guess, so show error and fail gracefully
-      console.error('❌ Cannot auto-detect backend URL on Railway. Login will fail until VITE_API_URL is set.');
-      // Return a placeholder that will fail but show clear error
-      return 'https://MISSING_VITE_API_URL.railway.app/api';
-    }
-  }
-  
-  // If accessed via ngrok (HTTPS), backend is still on network IP (HTTP)
-  if (hostname.includes('.ngrok.io') || hostname.includes('.ngrok-free.app') || hostname.includes('.ngrok.app')) {
-    // Frontend is HTTPS via ngrok, but backend is still HTTP on network
-    return `http://${networkIP}:${port}/api`;
-  }
-  
-  // If hostname is an IP address (network access), use it
-  // BUT: If the hostname is the phone's IP (192.168.1.14), use the server's IP (192.168.1.3)
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
-    // If accessing from phone's IP, use server's IP for backend
-    if (hostname === '192.168.1.14') {
-      return `${protocol}//${networkIP}:${port}/api`;
-    }
-    return `${protocol}//${hostname}:${port}/api`;
-  }
-  
-  // If on localhost (development)
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    console.log('🔧 Development mode: Using localhost API');
-    return 'http://localhost:3001/api';
-  }
-  
-  // Fallback: if we don't recognize the hostname, warn and use localhost
-  console.warn('⚠️ Unknown hostname:', hostname, '- falling back to localhost. Set VITE_API_URL if this is production.');
-  return 'http://localhost:3001/api';
-};
+// Use localhost for local development, network IP only if explicitly set and needed
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
 
-const API_BASE_URL = getApiBaseUrl();
-
-// Always log API URL for debugging (helps identify issues in production)
-console.log('🌐 API Base URL:', API_BASE_URL);
-console.log('🔧 Environment VITE_API_URL:', import.meta.env.VITE_API_URL || 'NOT SET');
-console.log('📍 Current hostname:', window.location.hostname);
+// Log API URL for debugging
+console.log('API Base URL:', API_BASE_URL)
+console.log('Environment VITE_API_URL:', import.meta.env.VITE_API_URL)
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -98,37 +25,61 @@ api.interceptors.request.use((config) => {
   if (config.data instanceof FormData) {
     delete config.headers['Content-Type']
   }
-  // Only log API requests in development
-  if (import.meta.env.DEV) {
-    console.log('API Request:', config.method?.toUpperCase(), config.url)
-  }
+  console.log('API Request:', config.method?.toUpperCase(), config.url)
   return config
 }, (error) => {
   console.error('Request interceptor error:', error)
   return Promise.reject(error)
 })
 
-// Handle token refresh on 401
+// Enhanced retry logic for network reliability
+const shouldRetryRequest = (error: any, retryCount: number): boolean => {
+  // Don't retry more than 3 times
+  if (retryCount >= 3) return false
+
+  // Retry on network errors
+  if (!error.response) {
+    console.warn(`🔄 Network error (attempt ${retryCount + 1}/3):`, error.message)
+    return true
+  }
+
+  // Retry on specific HTTP status codes
+  const retryableStatuses = [408, 429, 500, 502, 503, 504]
+  if (retryableStatuses.includes(error.response.status)) {
+    console.warn(`🔄 HTTP ${error.response.status} error (attempt ${retryCount + 1}/3):`, error.config?.url)
+    return true
+  }
+
+  // Retry on timeout
+  if (error.code === 'ECONNABORTED') {
+    console.warn(`🔄 Request timeout (attempt ${retryCount + 1}/3):`, error.config?.url)
+    return true
+  }
+
+  return false
+}
+
+const calculateRetryDelay = (retryCount: number): number => {
+  // Exponential backoff: 1s, 2s, 4s
+  return Math.min(1000 * Math.pow(2, retryCount), 4000)
+}
+
+// Handle token refresh on 401 and add retry logic
 api.interceptors.response.use(
   (response) => {
-    // Only log API responses in development
-    if (import.meta.env.DEV) {
-      console.log('API Response:', response.status, response.config.url)
-    }
+    console.log('API Response:', response.status, response.config.url)
     return response
   },
   async (error) => {
-    // Only log API errors in development (or for critical errors)
-    if (import.meta.env.DEV || error.response?.status >= 500) {
-      console.error('API Error:', {
-        message: error.message,
-        code: error.code,
-        status: error.response?.status,
-        url: error.config?.url,
-        timeout: error.code === 'ECONNABORTED'
-      })
-    }
-    
+    console.error('API Error:', {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status,
+      url: error.config?.url,
+      timeout: error.code === 'ECONNABORTED'
+    })
+
+    // Handle 401 (token refresh) - don't retry this
     if (error.response?.status === 401) {
       const refreshToken = localStorage.getItem('refresh_token')
       if (refreshToken) {
@@ -137,7 +88,7 @@ api.interceptors.response.use(
             refreshToken,
           })
           localStorage.setItem('access_token', response.data.accessToken)
-          // Retry original request
+          // Retry original request once after token refresh
           return api.request(error.config)
         } catch (refreshError) {
           localStorage.removeItem('access_token')
@@ -149,9 +100,107 @@ api.interceptors.response.use(
         window.location.href = '/login'
       }
     }
+
+    // Add retry logic for emergency operations and network issues
+    const isEmergencyOperation = error.config?.url?.includes('/emergenc')
+    const retryCount = (error.config?.retryCount || 0)
+
+    if ((isEmergencyOperation || shouldRetryRequest(error, retryCount)) && retryCount < 3) {
+      const delay = calculateRetryDelay(retryCount)
+
+      console.log(`⏳ Retrying ${error.config.method?.toUpperCase()} ${error.config.url} in ${delay}ms (attempt ${retryCount + 1}/3)`)
+
+      // Wait and retry
+      await new Promise(resolve => setTimeout(resolve, delay))
+
+      // Increment retry count and retry
+      error.config.retryCount = retryCount + 1
+      return api.request(error.config)
+    }
+
+    // If we've exhausted retries or it's not retryable, reject
     return Promise.reject(error)
   }
 )
+
+// Emergency-specific API operations with enhanced error handling
+export const emergencyAPI = {
+  // Accept emergency with better error handling
+  acceptEmergency: async (emergencyId: string) => {
+    try {
+      const response = await api.post(`/emergencies/${emergencyId}/accept`, {})
+      console.log('✅ Emergency accepted successfully')
+      return response
+    } catch (error: any) {
+      console.error('❌ Failed to accept emergency:', error)
+
+      // Provide user-friendly error messages
+      if (error.response?.status === 404) {
+        throw new Error('Emergency not found or has ended.')
+      } else if (error.response?.status === 403) {
+        throw new Error('You are not authorized to respond to this emergency.')
+      } else if (error.response?.status === 409) {
+        throw new Error('This emergency has already been accepted by someone else.')
+      } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        throw new Error('Request timed out. Please check your connection and try again.')
+      } else {
+        throw new Error(error.response?.data?.error || 'Failed to accept emergency. Please try again.')
+      }
+    }
+  },
+
+  // Share location with retry logic
+  shareLocation: async (emergencyId: string, latitude: number, longitude: number, retries = 2) => {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        console.log(`📍 Sharing location (attempt ${attempt + 1}/${retries + 1})`)
+        const response = await api.post(`/emergencies/${emergencyId}/location`, {
+          latitude,
+          longitude,
+        })
+        console.log('✅ Location shared successfully')
+        return response
+      } catch (error: any) {
+        console.warn(`⚠️ Location sharing attempt ${attempt + 1} failed:`, error.message)
+
+        if (attempt === retries) {
+          // Provide user-friendly error messages
+          if (error.response?.status === 403) {
+            throw new Error('You must accept the emergency before sharing your location.')
+          } else if (error.response?.status === 404) {
+            throw new Error('Emergency not found.')
+          } else {
+            throw new Error('Failed to share location. Please try again.')
+          }
+        }
+
+        // Wait before retry (exponential backoff)
+        const delay = Math.min(1000 * Math.pow(2, attempt), 3000)
+        console.log(`⏳ Retrying location share in ${delay}ms...`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
+    }
+  },
+
+  // Reject emergency with better error handling
+  rejectEmergency: async (emergencyId: string) => {
+    try {
+      const response = await api.post(`/emergencies/${emergencyId}/reject`, {})
+      console.log('✅ Emergency rejected successfully')
+      return response
+    } catch (error: any) {
+      console.error('❌ Failed to reject emergency:', error)
+
+      if (error.response?.status === 403) {
+        throw new Error('You cannot reject this emergency.')
+      } else if (error.response?.status === 404) {
+        throw new Error('Emergency not found.')
+      } else {
+        throw new Error(error.response?.data?.error || 'Failed to reject emergency.')
+      }
+    }
+  }
+}
 
 export default api
 

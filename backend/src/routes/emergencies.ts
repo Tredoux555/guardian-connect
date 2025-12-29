@@ -30,6 +30,7 @@ router.post(
 
       // Create emergency
       const emergency = await Emergency.create(userId);
+      console.log(`🚨 Emergency created: ${emergency.id} by user ${userId}`);
 
       // Get user's emergency contacts
       const contactsResult = await query(
@@ -40,20 +41,27 @@ router.post(
       );
 
       const contacts = contactsResult.rows;
+      console.log(`📋 Found ${contacts.length} emergency contacts for user ${userId}:`);
+      contacts.forEach((c: any, i: number) => {
+        console.log(`   ${i + 1}. ${c.contact_name || 'Unknown'} (${c.contact_email}) - user_id: ${c.contact_user_id || 'NOT REGISTERED'}`);
+      });
 
       // Add all contacts as participants (status: pending)
       const participantPromises = contacts.map(async (contact: any) => {
         if (contact.contact_user_id) {
           // Contact is a registered user
           await Emergency.addParticipant(emergency.id, contact.contact_user_id);
+          console.log(`   ✅ Added participant: ${contact.contact_user_id}`);
           return { userId: contact.contact_user_id, name: contact.contact_name };
         }
+        console.log(`   ⚠️ Contact ${contact.contact_email} is NOT a registered user - cannot notify`);
         return null;
       });
 
       const participants = (await Promise.all(participantPromises)).filter(
         (p: any) => p !== null
       );
+      console.log(`👥 Total participants to notify: ${participants.length}`);
 
       // Get sender display name and email for notifications
       const userResult = await query(
@@ -64,18 +72,44 @@ router.post(
       const senderDisplayName = getUserDisplayName(senderUser);
 
       // Send notifications to all registered contacts
+      console.log(`📤 Starting notification process for ${participants.length} participant(s)...`);
+      
       for (const participant of participants) {
         if (participant && participant.userId) {
+          console.log(`\n📤 === NOTIFICATION ATTEMPT FOR: ${participant.userId} (${participant.name}) ===`);
+          
+          // Check if user has FCM token before attempting push
+          const tokenCheck = await query(
+            'SELECT fcm_token FROM users WHERE id = $1',
+            [participant.userId]
+          );
+          const hasFcmToken = tokenCheck.rows.length > 0 && 
+                             tokenCheck.rows[0].fcm_token != null &&
+                             tokenCheck.rows[0].fcm_token.toString().trim().isNotEmpty;
+          
+          console.log(`   🔑 FCM Token Status: ${hasFcmToken ? '✅ EXISTS' : '❌ MISSING'}`);
+          
           // Send Firebase push notification (for mobile apps)
-          try {
-            await sendEmergencyAlert(
-              participant.userId,
-              emergency.id,
-              senderDisplayName,
-              undefined // Location will be sent when user accepts
-            );
-          } catch (error) {
-            console.error(`Failed to send Firebase alert to ${participant.userId}:`, error);
+          if (hasFcmToken) {
+            try {
+              await sendEmergencyAlert(
+                participant.userId,
+                emergency.id,
+                senderDisplayName,
+                undefined // Location will be sent when user accepts
+              );
+              console.log(`   ✅ Firebase push sent successfully to ${participant.userId}`);
+            } catch (error: any) {
+              console.error(`   ❌ FAILED to send Firebase alert to ${participant.userId}:`, error);
+              console.error(`      Error type: ${error?.constructor?.name || 'Unknown'}`);
+              console.error(`      Error message: ${error?.message || error?.toString() || 'No message'}`);
+              if (error?.stack) {
+                console.error(`      Stack: ${error.stack}`);
+              }
+            }
+          } else {
+            console.log(`   ⚠️ SKIPPING Firebase push - no FCM token for user ${participant.userId}`);
+            console.log(`      User needs to log in to register FCM token`);
           }
 
           // Send Web Push notification (for web browsers - works even when app is closed)
@@ -85,20 +119,30 @@ router.post(
               emergency.id,
               senderDisplayName
             );
-          } catch (error) {
-            console.error(`Failed to send web push to ${participant.userId}:`, error);
+            console.log(`   ✅ Web push sent to ${participant.userId}`);
+          } catch (error: any) {
+            console.error(`   ❌ Failed to send web push to ${participant.userId}:`, error?.message || error);
           }
 
           // Emit socket event (for real-time updates when app is open)
-          emitToUser(participant.userId, 'emergency_created', {
-            emergencyId: emergency.id,
-            userId,
-            userEmail: senderUser.email,
-            senderName: senderDisplayName,
-            participants: participants.length,
-          });
+          try {
+            console.log(`   📡 Emitting socket event 'emergency_created' to user:${participant.userId}`);
+            emitToUser(participant.userId, 'emergency_created', {
+              emergencyId: emergency.id,
+              userId,
+              userEmail: senderUser.email,
+              senderName: senderDisplayName,
+              participants: participants.length,
+            });
+            console.log(`   ✅ Socket event emitted to user:${participant.userId}`);
+          } catch (error: any) {
+            console.error(`   ❌ Failed to emit socket event to ${participant.userId}:`, error?.message || error);
+          }
+          
+          console.log(`📤 === END NOTIFICATION ATTEMPT FOR: ${participant.userId} ===\n`);
         }
       }
+      console.log(`✅ Emergency ${emergency.id} created and all notifications sent`)
 
       res.status(201).json({
         emergency: {
@@ -143,21 +187,11 @@ router.post(
       // Update participant status to accepted
       await Emergency.updateParticipantStatus(emergencyId, userId, 'accepted');
 
-      // Get user's display name for socket event
-      const userResult = await query(
-        'SELECT display_name, email FROM users WHERE id = $1',
-        [userId]
-      );
-      const user = userResult.rows[0] || { email: participant.user_email };
-      const userDisplayName = getUserDisplayName(user);
-
       // Emit socket event to all participants
       emitToEmergency(emergencyId, 'participant_accepted', {
         emergencyId,
         userId,
-        userName: userDisplayName,
-        user_email: user.email,
-        user_display_name: userDisplayName,
+        userName: participant.user_email,
       });
 
       res.json({
@@ -230,20 +264,41 @@ router.post(
 
       const emergencyId = req.params.id;
       const userId = req.userId!;
-      const { latitude, longitude } = req.body;
+      const { latitude, longitude, accuracy } = req.body;
 
-      // STEP 2: Log received coordinates from client (detailed)
-      console.log('🔍 [COORDINATE TRACE] Step 2 - Backend received from client:', {
-        emergencyId,
-        userId,
-        receivedLatitude: latitude,
-        receivedLongitude: longitude,
-        latitudeType: typeof latitude,
-        longitudeType: typeof longitude,
-        latitudeString: String(latitude),
-        longitudeString: String(longitude),
-        timestamp: new Date().toISOString()
-      });
+      // Reject known fallback/default coordinates that browsers return when GPS isn't available
+      // San Francisco fallback (Google's default): 37.785834, -122.406417
+      // This happens when:
+      // - Desktop browsers use IP-based geolocation
+      // - VPN makes IP appear in San Francisco
+      // - Browser can't access real GPS
+      const isSanFranciscoFallback = 
+        (Math.abs(latitude - 37.785834) < 0.0001 && Math.abs(longitude - (-122.406417)) < 0.0001) ||
+        (Math.abs(latitude - 37.7858) < 0.001 && Math.abs(longitude - (-122.4064)) < 0.001);
+      
+      const isNullIslandFallback = Math.abs(latitude) < 0.001 && Math.abs(longitude) < 0.001;
+      
+      if (isSanFranciscoFallback || isNullIslandFallback) {
+        console.warn(`⚠️ Rejecting fallback location for user ${userId}:`, {
+          latitude,
+          longitude,
+          reason: isSanFranciscoFallback ? 'San Francisco fallback (IP-based)' : 'Null Island fallback',
+          emergencyId
+        });
+        return res.status(400).json({ 
+          error: 'Invalid location: Browser returned fallback coordinates. Please enable GPS or use a mobile device for accurate location.',
+          code: 'FALLBACK_LOCATION',
+          details: {
+            detected: isSanFranciscoFallback ? 'san_francisco_fallback' : 'null_island_fallback',
+            suggestion: 'Use mobile device with GPS enabled for accurate emergency location'
+          }
+        });
+      }
+
+      // Warn about low accuracy locations (but still accept them)
+      if (accuracy && accuracy > 1000) {
+        console.warn(`⚠️ Low accuracy location from user ${userId}: ${accuracy}m (emergency: ${emergencyId})`);
+      }
 
       // Verify emergency exists and is active
       const emergency = await Emergency.findById(emergencyId);
@@ -262,41 +317,8 @@ router.post(
         });
       }
 
-      // STEP 3: Validate and parse coordinates before storing
-      const lat = typeof latitude === 'string' ? parseFloat(latitude) : Number(latitude);
-      const lng = typeof longitude === 'string' ? parseFloat(longitude) : Number(longitude);
-      
-      console.log('🔍 [COORDINATE TRACE] Step 3 - Backend parsed coordinates:', {
-        receivedLat: latitude,
-        receivedLng: longitude,
-        parsedLat: lat,
-        parsedLng: lng,
-        latIsNaN: isNaN(lat),
-        lngIsNaN: isNaN(lng),
-        latPrecision: lat.toString().split('.')[1]?.length || 0,
-        lngPrecision: lng.toString().split('.')[1]?.length || 0
-      });
-      
-      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        console.error('❌ Invalid coordinates received:', { latitude, longitude, lat, lng });
-        return res.status(400).json({ error: 'Invalid coordinates' });
-      }
-
-      // STEP 4: Store in database (DECIMAL(10,8) and DECIMAL(11,8))
-      await Emergency.addLocation(emergencyId, userId, lat, lng);
-      
-      console.log('🔍 [COORDINATE TRACE] Step 4 - Backend stored in database:', {
-        emergencyId,
-        userId,
-        storedLatitude: lat,
-        storedLongitude: lng,
-        storedLatType: typeof lat,
-        storedLngType: typeof lng,
-        storedLatString: String(lat),
-        storedLngString: String(lng),
-        databasePrecision: 'DECIMAL(10,8) for latitude, DECIMAL(11,8) for longitude',
-        note: 'PostgreSQL will store with exact precision, but may return as string or number'
-      });
+      // Add location
+      await Emergency.addLocation(emergencyId, userId, latitude, longitude);
 
       // Get user's display name and email for socket event
       const userResult = await query(
@@ -343,6 +365,15 @@ router.get('/pending', authenticate, async (req: AuthRequest, res: Response) => 
        ORDER BY e.created_at DESC`,
       [userId]
     );
+    
+    // Log when there are pending emergencies (helpful for debugging)
+    if (result.rows.length > 0) {
+      console.log(`📥 User ${userId} has ${result.rows.length} pending emergency(ies):`);
+      result.rows.forEach((e: any, i: number) => {
+        console.log(`   ${i + 1}. ${e.id} from ${e.sender_display_name || e.sender_email}`);
+      });
+    }
+    
     res.json(result.rows);
   } catch (error) {
     console.error('Get pending emergencies error:', error);
@@ -463,6 +494,86 @@ router.post(
     } catch (error) {
       console.error('Cancel emergency error:', error);
       res.status(500).json({ error: 'Failed to cancel emergency' });
+    }
+  }
+);
+
+// Escalate emergency to emergency services
+router.post(
+  '/:id/escalate',
+  authenticate,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const emergencyId = req.params.id;
+      const { reason, latitude, longitude, sender_name } = req.body;
+      
+      // Get emergency
+      const emergency = await Emergency.findById(emergencyId);
+      if (!emergency) {
+        return res.status(404).json({ error: 'Emergency not found' });
+      }
+      
+      // Log escalation
+      console.log(`🚨 ESCALATION: Emergency ${emergencyId} escalated to emergency services`);
+      console.log(`   Reason: ${reason}`);
+      console.log(`   Location: ${latitude}, ${longitude}`);
+      console.log(`   Sender: ${sender_name}`);
+      
+      // TODO: Integrate with emergency services API (911, etc.)
+      // For now, just log and update emergency status
+      await Emergency.update(emergencyId, {
+        status: 'escalated',
+        escalatedAt: new Date().toISOString(),
+        escalationReason: reason,
+      });
+      
+      // Notify all participants
+      emitToEmergency(emergencyId, 'emergency_escalated', {
+        emergencyId,
+        reason,
+        escalatedAt: new Date().toISOString(),
+      });
+      
+      res.json({ 
+        message: 'Emergency escalated to emergency services',
+        escalatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('Escalate emergency error:', error);
+      res.status(500).json({ error: 'Failed to escalate emergency' });
+    }
+  }
+);
+
+// Get emergency history
+router.get(
+  '/history',
+  authenticate,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const page = parseInt(req.query.page as string) || 0;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const offset = page * limit;
+      
+      // Get emergencies where user was sender or participant
+      const result = await query(
+        `SELECT DISTINCT e.*, 
+         COUNT(DISTINCT ep.user_id) FILTER (WHERE ep.status = 'accepted') as responder_count
+         FROM emergencies e
+         LEFT JOIN emergency_participants ep ON e.id = ep.emergency_id
+         WHERE (e.user_id = $1 OR ep.user_id = $1)
+         AND e.status IN ('ended', 'cancelled', 'escalated')
+         GROUP BY e.id
+         ORDER BY e.created_at DESC
+         LIMIT $2 OFFSET $3`,
+        [userId, limit, offset]
+      );
+      
+      res.json(result.rows);
+    } catch (error) {
+      console.error('Get emergency history error:', error);
+      res.status(500).json({ error: 'Failed to get emergency history' });
     }
   }
 );

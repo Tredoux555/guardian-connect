@@ -12,16 +12,15 @@ import notificationRoutes from './routes/notifications';
 import donationRoutes from './routes/donations';
 import subscriptionRoutes from './routes/subscriptions';
 import { initializeSocket } from './services/socket';
-import { authenticate } from './middleware/auth';
+import { authenticate, AuthRequest } from './middleware/auth';
+import { query } from './database/db';
+import { Response } from 'express';
 
 dotenv.config();
 
 const app: Express = express();
 const httpServer = createServer(app);
-const PORT = parseInt(process.env.PORT || '3001', 10);
-
-// Trust proxy - required for Railway's reverse proxy and rate limiting
-app.set('trust proxy', true);
+const PORT = process.env.PORT || 3001; // Default to 3001 to match mobile app
 
 // Initialize Socket.io
 initializeSocket(httpServer);
@@ -31,92 +30,81 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 // CORS configuration - allow all localhost ports for development
-// Also allow network IP addresses for phone access
-// Get current network IP dynamically
-const getNetworkIP = (): string => {
-  // Try to get from environment variable first
-  if (process.env.NETWORK_IP) {
-    return process.env.NETWORK_IP;
-  }
-  // Default to common network IP (update if needed)
-  return '192.168.1.3';
-};
-const networkIP = getNetworkIP(); // Your local network IP
-// Parse ALLOWED_ORIGINS, filtering out empty strings
-const parseAllowedOrigins = (): string[] => {
-  if (!process.env.ALLOWED_ORIGINS) {
-    return [];
-  }
-  return process.env.ALLOWED_ORIGINS
-    .split(',')
-    .map(o => o.trim())
-    .filter(o => o.length > 0); // Remove empty strings
-};
-
-const envAllowedOrigins = parseAllowedOrigins();
-const allowedOrigins = envAllowedOrigins.length > 0 ? envAllowedOrigins : [
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [
+  // Production domains
+  'https://app.guardianconnect.icu',
+  'https://admin.guardianconnect.icu',
+  'https://guardianconnect.icu',
+  // Development (localhost)
   'http://localhost:3002', // Admin panel (default)
   'http://localhost:3003', // Web user interface (default)
   'http://localhost:3004', // Admin panel (alternative port)
   'http://localhost:3005', // Web user interface (alternative port)
-  'http://localhost:3000', // Mobile app (if using web)
-  `http://${networkIP}:3002`, // Admin panel (network)
-  `http://${networkIP}:3003`, // Web user interface (network)
-  `http://${networkIP}:3004`, // Admin panel (network alternative)
-  `http://${networkIP}:3005`, // Web user interface (network alternative)
+  'http://localhost:3000', // Backend API (matches mobile app)
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
-    try {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) {
-        console.log('✅ CORS: Allowing request with no origin');
-        return callback(null, true);
-      }
-      
-      // In development, allow ALL origins for easier testing
-      // This prevents CORS issues when frontend and backend are on different IPs/ports
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('✅ CORS: Allowing origin in development:', origin);
-        return callback(null, true);
-      }
-      
-      // In production, check allowed origins
-      // If ALLOWED_ORIGINS is not set or empty, allow all (for initial setup)
-      if (!process.env.ALLOWED_ORIGINS || envAllowedOrigins.length === 0) {
-        console.warn('⚠️ CORS: ALLOWED_ORIGINS not set or empty, allowing all origins (not recommended for production)');
-        console.warn('⚠️ CORS: Set ALLOWED_ORIGINS environment variable for production security');
-        return callback(null, true);
-      }
-      
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        console.log('✅ CORS: Allowing origin from allowed list:', origin);
-        return callback(null, true);
-      } else {
-        console.warn('❌ CORS: Blocked origin:', origin);
-        console.warn('❌ CORS: Allowed origins:', allowedOrigins);
-        // Return false instead of error to properly reject CORS
-        return callback(null, false);
-      }
-    } catch (error: any) {
-      console.error('❌ CORS: Error in origin callback:', error);
-      console.error('❌ CORS: Error stack:', error?.stack);
-      // On error, allow the request to prevent complete failure (but log it)
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      console.log('✅ CORS: Allowing request with no origin');
       return callback(null, true);
+    }
+    
+    // In development, allow ALL origins for easier testing
+    // This prevents CORS issues when frontend and backend are on different IPs/ports
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('✅ CORS: Allowing origin in development:', origin);
+      return callback(null, true);
+    }
+    
+    // In production, check allowed origins
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      console.log('✅ CORS: Allowing origin from allowed list:', origin);
+      callback(null, true);
+    } else {
+      console.warn('❌ CORS: Blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files for uploaded images
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Serve static files for uploaded images, videos, and audio with CORS headers
+app.use('/uploads', (req, res, next) => {
+  // Set CORS headers for static files
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  next();
+}, express.static(path.join(__dirname, '../uploads'), {
+  setHeaders: (res, filePath) => {
+    // Set appropriate content type based on file extension
+    if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) {
+      res.setHeader('Content-Type', 'image/jpeg');
+    } else if (filePath.endsWith('.png')) {
+      res.setHeader('Content-Type', 'image/png');
+    } else if (filePath.endsWith('.webp')) {
+      res.setHeader('Content-Type', 'image/webp');
+    } else if (filePath.endsWith('.mp4')) {
+      res.setHeader('Content-Type', 'video/mp4');
+    } else if (filePath.endsWith('.webm')) {
+      res.setHeader('Content-Type', 'video/webm');
+    } else if (filePath.endsWith('.mov')) {
+      res.setHeader('Content-Type', 'video/quicktime');
+    } else if (filePath.endsWith('.mp3')) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+    } else if (filePath.endsWith('.wav')) {
+      res.setHeader('Content-Type', 'audio/wav');
+    } else if (filePath.endsWith('.m4a')) {
+      res.setHeader('Content-Type', 'audio/mp4');
+    }
+  },
+}));
 
 // Root route
 app.get('/', (req, res) => {
@@ -139,69 +127,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Diagnostic endpoint to check backend configuration
-app.get('/api/diagnostic', async (req, res) => {
-  const diagnostics: any = {
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    checks: {},
-  };
-
-  // Check database connection
-  try {
-    const { query } = await import('./database/db');
-    const result = await query('SELECT NOW() as current_time');
-    diagnostics.checks.database = {
-      status: 'connected',
-      currentTime: result.rows[0]?.current_time,
-    };
-  } catch (error: any) {
-    diagnostics.checks.database = {
-      status: 'error',
-      error: error.message,
-      code: error.code,
-    };
-  }
-
-  // Check if users table exists
-  try {
-    const { query } = await import('./database/db');
-    const result = await query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = 'users'
-      );
-    `);
-    diagnostics.checks.usersTable = {
-      exists: result.rows[0]?.exists || false,
-    };
-  } catch (error: any) {
-    diagnostics.checks.usersTable = {
-      exists: false,
-      error: error.message,
-    };
-  }
-
-  // Check environment variables
-  diagnostics.checks.env = {
-    JWT_SECRET: process.env.JWT_SECRET ? 'set' : 'missing',
-    JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET ? 'set' : 'missing',
-    NODE_ENV: process.env.NODE_ENV || 'not set',
-    DB_HOST: process.env.PGHOST || process.env.DB_HOST || 'not set',
-    DB_NAME: process.env.PGDATABASE || process.env.DB_NAME || 'not set',
-    ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || 'not set',
-  };
-
-  // Determine overall status
-  const hasErrors = 
-    diagnostics.checks.database?.status === 'error' ||
-    !diagnostics.checks.usersTable?.exists ||
-    diagnostics.checks.env.JWT_SECRET === 'missing';
-
-  res.status(hasErrors ? 500 : 200).json(diagnostics);
-});
-
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/emergencies', emergencyRoutes);
@@ -212,8 +137,86 @@ app.use('/api/donations', donationRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 
 // Protected routes
-app.get('/api/user/me', authenticate, (req, res) => {
-  res.json({ message: 'User endpoint - to be implemented' });
+app.get('/api/user/me', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    console.log(`📡 GET /api/user/me - userId: ${userId}`);
+    
+    const result = await query(
+      'SELECT id, email, verified, display_name, created_at FROM users WHERE id = $1',
+      [userId]
+    );
+    
+    console.log(`📡 User query result: ${result.rows.length} rows`);
+    
+    if (result.rows.length === 0) {
+      console.log(`❌ User not found: ${userId}`);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const user = result.rows[0];
+    const responseData = {
+      id: user.id,
+      email: user.email,
+      verified: user.verified || false,
+      displayName: user.display_name,
+      created_at: user.created_at,
+    };
+    
+    console.log(`✅ Returning user data: ${JSON.stringify(responseData)}`);
+    // Ensure id is returned (not user_id) and include all necessary fields
+    res.json(responseData);
+  } catch (error) {
+    console.error('❌ Get user error:', error);
+    res.status(500).json({ error: 'Failed to get user info' });
+  }
+});
+
+// FCM Token registration endpoint - for push notifications
+app.post('/api/user/fcm-token', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { token } = req.body;
+    
+    console.log(`📱 POST /api/user/fcm-token - userId: ${userId}`);
+    console.log(`   Token: ${token ? token.substring(0, 20) + '... (' + token.length + ' chars)' : 'null (unregistering)'}`);
+    
+    // Check if user exists
+    const userCheck = await query('SELECT email, display_name FROM users WHERE id = $1', [userId]);
+    if (userCheck.rows.length === 0) {
+      console.error(`❌ User ${userId} not found`);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const userEmail = userCheck.rows[0].email;
+    console.log(`   User: ${userEmail}`);
+    
+    // Update or clear the FCM token
+    await query(
+      'UPDATE users SET fcm_token = $1 WHERE id = $2',
+      [token || null, userId]
+    );
+    
+    if (token) {
+      console.log(`✅ FCM token registered for user ${userId} (${userEmail})`);
+      console.log(`   Token length: ${token.length} characters`);
+      
+      // Verify it was saved
+      const verifyResult = await query('SELECT fcm_token FROM users WHERE id = $1', [userId]);
+      if (verifyResult.rows[0].fcm_token === token) {
+        console.log(`   ✅ Token verified in database`);
+      } else {
+        console.error(`   ❌ Token verification failed - token may not have been saved correctly`);
+      }
+    } else {
+      console.log(`✅ FCM token cleared for user ${userId} (${userEmail})`);
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ FCM token registration error:', error);
+    res.status(500).json({ error: 'Failed to register FCM token' });
+  }
 });
 
 // Error handling middleware
@@ -230,7 +233,7 @@ app.use((req, res) => {
 });
 
 // Listen on all interfaces (0.0.0.0) to allow network access
-httpServer.listen(PORT, '0.0.0.0', () => {
+httpServer.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌐 Accessible on all network interfaces (0.0.0.0:${PORT})`);
   console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);

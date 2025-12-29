@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { GoogleMap, Marker, InfoWindow } from '@react-google-maps/api'
+import { OpenLocationCode } from 'open-location-code'
 import api from '../services/api'
 import { getCurrentUserId } from '../utils/jwt'
 import { 
@@ -63,6 +64,18 @@ function EmergencyActive() {
   const locationSharedRef = useRef(false)
   const [googleMapsUrl, setGoogleMapsUrl] = useState<string | null>(null)
   const [googleMapsUrlLoading, setGoogleMapsUrlLoading] = useState(false)
+  const [manualLocationSharing, setManualLocationSharing] = useState(false)
+
+  // Helper function to refresh Eruda console after important logs
+  const refreshErudaConsole = useCallback(() => {
+    if (typeof window !== 'undefined' && (window as any).eruda?._console) {
+      try {
+        (window as any).eruda._console._refresh()
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -237,15 +250,41 @@ function EmergencyActive() {
       
       navigator.geolocation.getCurrentPosition(
         async (position) => {
+          const lat = position.coords.latitude
+          const lng = position.coords.longitude
+          const accuracy = position.coords.accuracy
+          
+          // Check for fallback/invalid locations
+          const isSanFranciscoFallback = 
+            (Math.abs(lat - 37.785834) < 0.0001 && Math.abs(lng - (-122.406417)) < 0.0001) ||
+            (Math.abs(lat - 37.7858) < 0.001 && Math.abs(lng - (-122.4064)) < 0.001)
+          
+          const isNullIslandFallback = Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001
+          
+          if (isSanFranciscoFallback || isNullIslandFallback) {
+            console.error('❌ LOCATION REJECTED: Browser returned fallback coordinates', {
+              latitude: lat,
+              longitude: lng,
+              accuracy: accuracy,
+              reason: isSanFranciscoFallback ? 'San Francisco fallback' : 'Null Island',
+              userId: currentUserId,
+              isSender: senderCheck
+            })
+            // Don't send fallback locations - they're worse than no location
+            return
+          }
+          
           try {
             await api.post(`/emergencies/${id}/location`, {
-              latitude: position.coords.latitude,
-              longitude: position.coords.longitude,
+              latitude: lat,
+              longitude: lng,
+              accuracy: accuracy,
             })
             // Always log location sharing (critical for debugging)
             console.log('✅ Location shared once:', {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
+              lat: lat,
+              lng: lng,
+              accuracy: accuracy,
               userId: currentUserId,
               emergencyId: id,
               isSender: senderCheck
@@ -269,13 +308,29 @@ function EmergencyActive() {
         },
         (err) => {
           // Always log geolocation errors (critical for debugging)
-          console.error('❌ Location error:', {
+          const errorDetails = {
             code: err.code,
             message: err.message,
             userId: currentUserId,
             emergencyId: id,
             isSender: senderCheck,
-          })
+            protocol: window.location.protocol,
+            hostname: window.location.hostname,
+            userAgent: navigator.userAgent,
+            timestamp: new Date().toISOString()
+          }
+          
+          console.error('❌ Location error:', errorDetails)
+          
+          // Log specific error codes for better debugging
+          if (err.code === 1) {
+            console.error('❌ Error Code 1: PERMISSION_DENIED - User denied location permission')
+          } else if (err.code === 2) {
+            console.error('❌ Error Code 2: POSITION_UNAVAILABLE - Location unavailable (kCLErrorLocationUnknown)')
+          } else if (err.code === 3) {
+            console.error('❌ Error Code 3: TIMEOUT - Location request timed out')
+          }
+          
           // CRITICAL: Don't reset locationSharedRef on permission denied (code 1)
           // This prevents infinite retry loop on HTTP/iPhone
           // Only reset on other errors (timeout, unavailable)
@@ -288,6 +343,15 @@ function EmergencyActive() {
               isSender: senderCheck,
             })
             console.info('💡 Tip: Geolocation requires HTTPS (or localhost). Use HTTPS or enable location manually.')
+          } else if (err.code === 2) {
+            // Position unavailable (kCLErrorLocationUnknown on iOS) - this is a temporary error
+            // Don't mark as shared, allow retry but with longer delay
+            console.warn('⚠️ Location unavailable (kCLErrorLocationUnknown). This may be temporary.', {
+              userId: currentUserId,
+              isSender: senderCheck,
+              suggestion: 'Location services may need time to acquire GPS signal. Try again in a few seconds.'
+            })
+            locationSharedRef.current = false // Allow retry
           } else {
             // Other errors (timeout, unavailable) - allow retry
             locationSharedRef.current = false
@@ -353,49 +417,52 @@ function EmergencyActive() {
       // Process locations with validation
       const locationsData = response.data.locations || []
       
-      // STEP 4: Log raw locations received from API
-      console.log('🔍 [COORDINATE TRACE] Step 4 - Locations received from API:', {
+      // DEBUG: Log locations received from API
+      console.log('📍 [DEBUG] Locations received from API:', {
         count: locationsData.length,
-        locations: locationsData.map((loc: any) => ({
-          userId: loc.user_id,
-          rawLatitude: loc.latitude,
-          rawLongitude: loc.longitude,
-          latitudeType: typeof loc.latitude,
-          longitudeType: typeof loc.longitude,
-          latitudeString: String(loc.latitude),
-          longitudeString: String(loc.longitude),
-          timestamp: loc.timestamp
-        }))
+        locations: locationsData,
+        emergencyId: id,
+        timestamp: new Date().toISOString(),
+        responseKeys: Object.keys(response.data)
       })
       
       // Validate and filter locations using unified coordinate parsing
       const validLocations = locationsData.filter((loc: Location) => {
-        if (!loc || !loc.user_id) return false
+        if (!loc || !loc.user_id) {
+          console.warn('⚠️ [DEBUG] Invalid location (missing user_id):', loc)
+          return false
+        }
         const lat = parseCoordinate(loc.latitude)
         const lng = parseCoordinate(loc.longitude)
-        return !isNaN(lat) && !isNaN(lng) && 
+        const isValid = !isNaN(lat) && !isNaN(lng) && 
                lat >= -90 && lat <= 90 && 
                lng >= -180 && lng <= 180
+        if (!isValid) {
+          console.warn('⚠️ [DEBUG] Invalid location coordinates:', { 
+            loc, 
+            parsedLat: lat, 
+            parsedLng: lng,
+            rawLat: loc.latitude,
+            rawLng: loc.longitude
+          })
+        }
+        return isValid
       })
       
-      // STEP 5: Log parsed coordinates
-      console.log('🔍 [COORDINATE TRACE] Step 5 - Parsed coordinates:', {
+      console.log('📍 [DEBUG] Valid locations after filtering:', {
         count: validLocations.length,
-        locations: validLocations.map((loc: Location) => ({
-          userId: loc.user_id,
-          rawLat: loc.latitude,
-          rawLng: loc.longitude,
-          parsedLat: parseCoordinate(loc.latitude),
-          parsedLng: parseCoordinate(loc.longitude),
-          formattedLat: formatCoordinate(parseCoordinate(loc.latitude)),
-          formattedLng: formatCoordinate(parseCoordinate(loc.longitude))
-        }))
+        locations: validLocations
       })
       
       // Remove duplicate locations by user_id (keep most recent)
       const uniqueLocations = validLocations.filter((loc: Location, index: number, self: Location[]) => 
         index === self.findIndex((l: Location) => String(l.user_id) === String(loc.user_id))
       )
+      
+      console.log('📍 [DEBUG] Unique locations after deduplication:', {
+        count: uniqueLocations.length,
+        locations: uniqueLocations
+      })
       
       if (uniqueLocations.length > 0) {
         // Find sender location for reference
@@ -404,18 +471,11 @@ function EmergencyActive() {
         )
         if (senderLoc) {
           setSenderLocation(senderLoc)
-          
-          // STEP 6: Log sender location details
-          const senderParsedLat = parseCoordinate(senderLoc.latitude)
-          const senderParsedLng = parseCoordinate(senderLoc.longitude)
-          const senderFormattedLat = formatCoordinate(senderParsedLat)
-          const senderFormattedLng = formatCoordinate(senderParsedLng)
-          
-          console.log('🔍 [COORDINATE TRACE] Step 6 - Sender location (final):', {
-            raw: { lat: senderLoc.latitude, lng: senderLoc.longitude },
-            parsed: { lat: senderParsedLat, lng: senderParsedLng },
-            formatted: { lat: senderFormattedLat, lng: senderFormattedLng },
-            willBeUsedInURL: `${senderFormattedLat},${senderFormattedLng}`
+          console.log('✅ [DEBUG] Sender location set:', senderLoc)
+        } else {
+          console.warn('⚠️ [DEBUG] Sender location not found in unique locations', {
+            senderUserId: emergencyData.user_id,
+            uniqueLocationUserIds: uniqueLocations.map((l: Location) => l.user_id)
           })
         }
         
@@ -428,16 +488,32 @@ function EmergencyActive() {
           const avgLng = uniqueLocations.reduce((sum: number, loc: Location) => 
             sum + parseCoordinate(loc.longitude), 0) / uniqueLocations.length
           setMapCenter({ lat: avgLat, lng: avgLng })
+          console.log('✅ [DEBUG] Setting map center (multiple locations):', { lat: avgLat, lng: avgLng })
         } else {
           // Single location - center on it using unified coordinate parsing
           const loc = uniqueLocations[0]
-          setMapCenter({
-            lat: parseCoordinate(loc.latitude),
-            lng: parseCoordinate(loc.longitude),
-          })
+          const centerLat = parseCoordinate(loc.latitude)
+          const centerLng = parseCoordinate(loc.longitude)
+          setMapCenter({ lat: centerLat, lng: centerLng })
+          console.log('✅ [DEBUG] Setting map center (single location):', { lat: centerLat, lng: centerLng })
         }
+        
+        console.log('✅ [DEBUG] Locations set on map successfully:', {
+          count: uniqueLocations.length,
+          mapCenter: uniqueLocations.length > 1 
+            ? { lat: uniqueLocations.reduce((sum: number, loc: Location) => sum + parseCoordinate(loc.latitude), 0) / uniqueLocations.length, 
+                lng: uniqueLocations.reduce((sum: number, loc: Location) => sum + parseCoordinate(loc.longitude), 0) / uniqueLocations.length }
+            : { lat: parseCoordinate(uniqueLocations[0].latitude), lng: parseCoordinate(uniqueLocations[0].longitude) }
+        })
       } else {
         // No valid locations yet
+        console.warn('⚠️ [DEBUG] No valid locations to display on map', {
+          locationsDataCount: locationsData.length,
+          validLocationsCount: validLocations.length,
+          uniqueLocationsCount: uniqueLocations.length,
+          emergencyId: id,
+          senderUserId: emergencyData.user_id
+        })
         setLocations([])
         setSenderLocation(null)
       }
@@ -645,12 +721,27 @@ function EmergencyActive() {
   }
 
   /**
-   * Generate Google Maps navigation URL using exact coordinates
-   * On mobile, use "My Location" as origin so Google Maps uses device GPS
-   * On desktop, use exact coordinates from locations array
-   * This ensures Google Maps uses GPS coordinates directly, not geocoded addresses
-   * Using coordinates directly prevents the "same location" error when both places
-   * geocode to the same district (e.g., "Haidian District, Beijing, China")
+   * Convert coordinates to Google Plus Code (Open Location Code)
+   * Plus Codes are designed to represent exact GPS coordinates without geocoding
+   * Using 11 characters for maximum precision (~3m accuracy instead of ~14m with default 8 chars)
+   */
+  const coordinatesToPlusCode = (lat: number, lng: number): string => {
+    try {
+      const olc = new OpenLocationCode()
+      // Use 11 characters for maximum precision (~3m x 3m area instead of ~14m x 14m)
+      return olc.encode(lat, lng, 11)
+    } catch (error) {
+      console.error('Error converting coordinates to Plus Code:', error)
+      // Fallback to empty string - will use coordinates instead
+      return ''
+    }
+  }
+
+  /**
+   * Generate Google Maps navigation URL with multiple format attempts for maximum accuracy
+   * Strategy: Use 'q' parameter format which prevents geocoding and uses exact coordinates
+   * On mobile, this opens the location, user can then tap "Directions" for navigation
+   * Alternative formats are tried if primary format doesn't work
    */
   const getGoogleMapsUrl = (
     originLat: string | number, 
@@ -659,125 +750,93 @@ function EmergencyActive() {
     destLng: string | number
   ): string => {
     try {
-      // STEP 7: Log input coordinates before formatting
-      console.log('🔍 [COORDINATE TRACE] Step 7 - getGoogleMapsUrl called with:', {
-        originLat: { value: originLat, type: typeof originLat, string: String(originLat) },
-        originLng: { value: originLng, type: typeof originLng, string: String(originLng) },
-        destLat: { value: destLat, type: typeof destLat, string: String(destLat) },
-        destLng: { value: destLng, type: typeof destLng, string: String(destLng) }
-      })
-      
-      // Format all coordinates as strings with exact precision
-      const formattedDestLat = formatCoordinate(destLat)
-      const formattedDestLng = formatCoordinate(destLng)
-      
-      // STEP 8: Log formatted coordinates
-      console.log('🔍 [COORDINATE TRACE] Step 8 - Formatted coordinates:', {
-        formattedDestLat: { value: formattedDestLat, precision: formattedDestLat.split('.')[1]?.length || 0 },
-        formattedDestLng: { value: formattedDestLng, precision: formattedDestLng.split('.')[1]?.length || 0 },
-        inputDestLat: { value: destLat, type: typeof destLat },
-        inputDestLng: { value: destLng, type: typeof destLng }
-      })
+      // Parse coordinates to numbers with maximum precision
+      const destLatNum = typeof destLat === 'string' ? parseFloat(destLat) : destLat
+      const destLngNum = typeof destLng === 'string' ? parseFloat(destLng) : destLng
       
       // Validate destination coordinates
-      if (formattedDestLat === '0' || formattedDestLng === '0') {
+      if (isNaN(destLatNum) || isNaN(destLngNum) || destLatNum === 0 || destLngNum === 0) {
         throw new Error('Invalid destination coordinates')
       }
+      
+      // Format coordinates with full precision (no rounding)
+      const destLatStr = destLatNum.toString()
+      const destLngStr = destLngNum.toString()
       
       // Detect mobile device
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
       
       if (isMobile) {
-        // On mobile: Use destination only - Google Maps uses device GPS
-        // URL-encode the exact coordinate string
-        const destCoords = `${formattedDestLat},${formattedDestLng}`
-        const encodedDest = encodeURIComponent(destCoords)
-        const finalUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+        // Use ?q=lat,lng format - this drops a pin at exact coordinates
+        // The q parameter with raw coordinates shows exact location with a pin drop
+        // Format: https://www.google.com/maps?q=lat,lng
+        // This is the most reliable format for showing exact GPS coordinates with a pin
+        const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
         
-        // STEP 9: Log final URL for mobile
-        console.log('🔍 [COORDINATE TRACE] Step 9 - Final Google Maps URL (Mobile):', {
-          url: finalUrl,
-          destinationCoords: destCoords,
-          encodedDestination: encodedDest,
-          formattedLat: formattedDestLat,
-          formattedLng: formattedDestLng,
+        console.log('🔗 Step 9: Final Google Maps URL (Mobile - q parameter with exact coordinates):', {
+          url,
+          destinationCoords: `${destLatStr},${destLngStr}`,
+          formattedLat: destLatNum,
+          formattedLng: destLngNum,
           userAgent: navigator.userAgent,
-          isMobile: true
+          isMobile: true,
+          format: 'q parameter with exact coordinates (drops pin at exact location)',
+          note: 'Uses q parameter with raw coordinates to drop a pin at exact location. User can tap Directions for navigation.'
         })
-        
-        return finalUrl
+        refreshErudaConsole()
+        return url
       } else {
         // On desktop: Use exact origin and destination
-        const formattedOriginLat = formatCoordinate(originLat)
-        const formattedOriginLng = formatCoordinate(originLng)
-        
-        // STEP 8b: Log formatted origin coordinates
-        console.log('🔍 [COORDINATE TRACE] Step 8b - Formatted origin coordinates (Desktop):', {
-          formattedOriginLat: { value: formattedOriginLat, precision: formattedOriginLat.split('.')[1]?.length || 0 },
-          formattedOriginLng: { value: formattedOriginLng, precision: formattedOriginLng.split('.')[1]?.length || 0 },
-          inputOriginLat: { value: originLat, type: typeof originLat },
-          inputOriginLng: { value: originLng, type: typeof originLng }
-        })
+        const originLatNum = typeof originLat === 'string' ? parseFloat(originLat) : originLat
+        const originLngNum = typeof originLng === 'string' ? parseFloat(originLng) : originLng
         
         // Validate origin
-        if (formattedOriginLat === '0' || formattedOriginLng === '0') {
-          const destCoords = `${formattedDestLat},${formattedDestLng}`
-          const encodedDest = encodeURIComponent(destCoords)
-          const finalUrl = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
-          
-          console.log('🔍 [COORDINATE TRACE] Step 9b - Final URL (Desktop, no origin):', {
-            url: finalUrl,
-            reason: 'Invalid origin coordinates'
+        if (isNaN(originLatNum) || isNaN(originLngNum) || originLatNum === 0 || originLngNum === 0) {
+          // No valid origin - use 'q' parameter format with exact coordinates
+          const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
+          console.log('🔗 Step 9: Final Google Maps URL (Desktop - no origin, q parameter):', {
+            url,
+            destinationCoords: `${destLatStr},${destLngStr}`,
+            format: 'q parameter (exact coordinates)'
           })
-          
-          return finalUrl
+          refreshErudaConsole()
+          return url
         }
         
         // Check if origin and destination are identical
-        if (formattedOriginLat === formattedDestLat && formattedOriginLng === formattedDestLng) {
-          const destCoords = `${formattedDestLat},${formattedDestLng}`
-          const encodedDest = encodeURIComponent(destCoords)
-          const finalUrl = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
-          
-          console.log('🔍 [COORDINATE TRACE] Step 9b - Final URL (Desktop, same location):', {
-            url: finalUrl,
-            reason: 'Origin and destination are identical'
+        if (Math.abs(originLatNum - destLatNum) < 0.0001 && Math.abs(originLngNum - destLngNum) < 0.0001) {
+          const url = `https://www.google.com/maps?q=${destLatStr},${destLngStr}`
+          console.log('🔗 Step 9: Final Google Maps URL (Desktop - identical origin/dest, q parameter):', {
+            url,
+            destinationCoords: `${destLatStr},${destLngStr}`,
+            format: 'q parameter (exact coordinates)'
           })
-          
-          return finalUrl
+          refreshErudaConsole()
+          return url
         }
         
-        const originCoords = `${formattedOriginLat},${formattedOriginLng}`
-        const destCoords = `${formattedDestLat},${formattedDestLng}`
-        const encodedOrigin = encodeURIComponent(originCoords)
-        const encodedDest = encodeURIComponent(destCoords)
-        const finalUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodedOrigin}&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+        // Use directions format with exact coordinates (both origin and destination)
+        const originLatStr = originLatNum.toString()
+        const originLngStr = originLngNum.toString()
+        const url = `https://www.google.com/maps/dir/?api=1&origin=${originLatStr},${originLngStr}&destination=${destLatStr},${destLngStr}&travelmode=driving`
         
-        // STEP 9b: Log final URL for desktop
-        console.log('🔍 [COORDINATE TRACE] Step 9b - Final Google Maps URL (Desktop):', {
-          url: finalUrl,
-          originCoords: originCoords,
-          destinationCoords: destCoords,
-          encodedOrigin: encodedOrigin,
-          encodedDestination: encodedDest,
-          formattedOriginLat: formattedOriginLat,
-          formattedOriginLng: formattedOriginLng,
-          formattedDestLat: formattedDestLat,
-          formattedDestLng: formattedDestLng,
-          isMobile: false
+        console.log('🔗 Step 9: Final Google Maps URL (Desktop - directions):', {
+          url,
+          origin: `${originLatStr},${originLngStr}`,
+          destination: `${destLatStr},${destLngStr}`,
+          format: 'directions with exact coordinates'
         })
-        
-        return finalUrl
+        refreshErudaConsole()
+        return url
       }
       
     } catch (error) {
       console.error('Error generating Google Maps URL:', error)
-      // Fallback to destination only using string values
-      const formattedDestLat = formatCoordinate(destLat)
-      const formattedDestLng = formatCoordinate(destLng)
-      const destCoords = `${formattedDestLat},${formattedDestLng}`
-      const encodedDest = encodeURIComponent(destCoords)
-      return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+      refreshErudaConsole()
+      // Fallback to 'q' parameter format with coordinates
+      const destLatNum = typeof destLat === 'string' ? parseFloat(destLat) : destLat
+      const destLngNum = typeof destLng === 'string' ? parseFloat(destLng) : destLng
+      return `https://www.google.com/maps?q=${destLatNum},${destLngNum}`
     }
   }
 
@@ -941,6 +1000,102 @@ function EmergencyActive() {
   }
 
   /**
+   * Manually share location when automatic sharing fails
+   */
+  const shareLocationManually = async () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported in this browser.')
+      return
+    }
+
+    setManualLocationSharing(true)
+
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Location request timed out')), 15000)
+
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            clearTimeout(timeout)
+            resolve(pos)
+          },
+          (error) => {
+            clearTimeout(timeout)
+            reject(error)
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 30000 // Accept locations up to 30 seconds old
+          }
+        )
+      })
+
+      const lat = position.coords.latitude
+      const lng = position.coords.longitude
+      const accuracy = position.coords.accuracy
+      
+      // Check for fallback/invalid locations
+      const isSanFranciscoFallback = 
+        (Math.abs(lat - 37.785834) < 0.0001 && Math.abs(lng - (-122.406417)) < 0.0001) ||
+        (Math.abs(lat - 37.7858) < 0.001 && Math.abs(lng - (-122.4064)) < 0.001)
+      
+      const isNullIslandFallback = Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001
+      
+      if (isSanFranciscoFallback || isNullIslandFallback) {
+        console.error('❌ LOCATION REJECTED: Browser returned fallback coordinates', {
+          latitude: lat,
+          longitude: lng,
+          accuracy: accuracy,
+          reason: isSanFranciscoFallback ? 'San Francisco fallback' : 'Null Island'
+        })
+        alert('⚠️ Location Error\n\nYour browser returned a default location (San Francisco), not your real location.\n\nThis usually happens on desktop computers or when using a VPN.\n\nFor accurate location:\n• Use a mobile device with GPS\n• Disable VPN if possible\n• Try a different browser')
+        return
+      }
+      
+      // Warn about low accuracy
+      if (accuracy && accuracy > 2000) {
+        console.warn('⚠️ Low accuracy location:', { lat, lng, accuracy })
+        const proceed = confirm(`⚠️ Low Location Accuracy\n\nYour location accuracy is ${Math.round(accuracy)}m, which may be IP-based rather than GPS.\n\nDo you want to share this location anyway?`)
+        if (!proceed) return
+      }
+
+      // Share location with backend
+      await api.post(`/emergencies/${id}/location`, {
+        latitude: lat,
+        longitude: lng,
+        accuracy: accuracy,
+      })
+
+      console.log('✅ Location shared manually:', {
+        lat: lat,
+        lng: lng,
+        accuracy: accuracy
+      })
+
+      alert('✅ Location shared successfully!')
+
+      // Refresh locations to show the new one
+      loadEmergency()
+
+    } catch (error: any) {
+      console.error('❌ Manual location sharing failed:', error)
+
+      if (error.code === 1) {
+        alert('Location permission denied. Please allow location access and try again.')
+      } else if (error.code === 2) {
+        alert('Location unavailable. Please check your GPS and try again.')
+      } else if (error.code === 3) {
+        alert('Location request timed out. Please try again.')
+      } else {
+        alert('Failed to share location. Please try again.')
+      }
+    } finally {
+      setManualLocationSharing(false)
+    }
+  }
+
+  /**
    * End the emergency
    * Only the emergency creator can end an emergency
    */
@@ -1094,14 +1249,12 @@ function EmergencyActive() {
             if (isMobile) {
               // On mobile: Send only destination - Google Maps automatically uses device GPS
               // CRITICAL: Use already-formatted strings to preserve precision
-              const destCoords = `${formattedDestLat},${formattedDestLng}`
-              const encodedDest = encodeURIComponent(destCoords)
-              url = `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+              // Use direct coordinate format to prevent geocoding
+              url = `https://www.google.com/maps/dir/?api=1&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
             } else {
               // On desktop: Fallback to destination only
               const destCoords = `${formattedDestLat},${formattedDestLng}`
-              const encodedDest = encodeURIComponent(destCoords)
-              url = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+              url = `https://www.google.com/maps/search/?api=1&query=${destCoords}`
             }
           }
         } else {
@@ -1109,14 +1262,12 @@ function EmergencyActive() {
           if (isMobile) {
             // On mobile: Send only destination - Google Maps automatically uses device GPS for origin
             // CRITICAL: Use already-formatted strings to preserve precision
-            const destCoords = `${formattedDestLat},${formattedDestLng}`
-            const encodedDest = encodeURIComponent(destCoords)
-            url = `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+            // Use direct coordinate format to prevent geocoding
+            url = `https://www.google.com/maps/dir/?api=1&destination=${formattedDestLat},${formattedDestLng}&travelmode=driving`
           } else {
             // On desktop: Use destination only
             const destCoords = `${formattedDestLat},${formattedDestLng}`
-            const encodedDest = encodeURIComponent(destCoords)
-            url = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+            url = `https://www.google.com/maps/search/?api=1&query=${destCoords}`
           }
         }
         
@@ -1137,6 +1288,40 @@ function EmergencyActive() {
     generateUrl()
   }, [isSender, emergency?.user_id, locations, currentUserId])
 
+  // Helper function to copy coordinates to clipboard
+  const copyCoordinates = (lat: string | number, lng: string | number) => {
+    const coords = `${lat},${lng}`
+    navigator.clipboard.writeText(coords).then(() => {
+      alert(`Coordinates copied to clipboard: ${coords}`)
+    }).catch(() => {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea')
+      textArea.value = coords
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+      alert(`Coordinates copied to clipboard: ${coords}`)
+    })
+  }
+
+  // Generate navigation URLs for different map apps
+  const getNavigationUrls = (lat: string | number, lng: string | number) => {
+    const latStr = typeof lat === 'string' ? lat : lat.toString()
+    const lngStr = typeof lng === 'string' ? lng : lng.toString()
+    const coords = `${latStr},${lngStr}`
+    
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    const isAndroid = /Android/i.test(navigator.userAgent)
+    
+    return {
+      googleMaps: `https://www.google.com/maps?q=${coords}`,
+      appleMaps: isIOS ? `maps://?q=${coords}` : `https://maps.apple.com/?q=${coords}`,
+      waze: isAndroid ? `waze://?ll=${coords}&navigate=yes` : `https://waze.com/ul?ll=${coords}&navigate=yes`,
+      coordinates: coords
+    }
+  }
+
   // Google Maps button - MUST be before early return to follow Rules of Hooks
   const googleMapsButton = useMemo(() => {
     if (isSender || !emergency?.user_id) return null
@@ -1147,18 +1332,35 @@ function EmergencyActive() {
     // If no sender location yet, show message
     if (!senderLoc) {
       return (
-        <div style={{ 
-          padding: '1rem', 
+        <div style={{
+          padding: '1rem',
           backgroundColor: '#D4E8F5', /* Lighter medium baby blue - replaces yellow */
-          borderRadius: '8px', 
+          borderRadius: '8px',
           margin: '1rem 0',
           textAlign: 'center',
           color: '#4A6FA5' /* Darker blue text for contrast */
         }}>
           <p style={{ margin: 0, marginBottom: '0.5rem' }}>⏳ Waiting for emergency location data...</p>
-          <p style={{ margin: 0, fontSize: '0.85rem', color: '#666' }}>
-            The sender needs to share their location. If they're on HTTP, they should use the "Share Location" button.
+          <p style={{ margin: 0, marginBottom: '1rem', fontSize: '0.85rem', color: '#666' }}>
+            The sender needs to share their location. If automatic sharing failed, use the button below.
           </p>
+          <button
+            onClick={shareLocationManually}
+            disabled={manualLocationSharing}
+            style={{
+              padding: '0.75rem 1.5rem',
+              backgroundColor: manualLocationSharing ? '#ccc' : '#4A90E2',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '1rem',
+              fontWeight: 'bold',
+              cursor: manualLocationSharing ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            {manualLocationSharing ? '📍 Sharing Location...' : '📍 Share My Location'}
+          </button>
         </div>
       )
     }
@@ -1194,44 +1396,165 @@ function EmergencyActive() {
       )
     }
 
+    // Get exact coordinates (stored as string or number)
+    const lat = senderLoc.latitude
+    const lng = senderLoc.longitude
+    const latStr = typeof lat === 'string' ? lat : lat.toString()
+    const lngStr = typeof lng === 'string' ? lng : lng.toString()
+    
+    // Generate all navigation URLs
+    const navUrls = getNavigationUrls(latStr, lngStr)
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    const isAndroid = /Android/i.test(navigator.userAgent)
+
     // Generate comprehensive diagnostics
     const diagnostics = generateDiagnostics(senderLoc)
       
     return (
       <div>
-        <div className="maps-link-container" style={{ 
-          padding: '1rem', 
-          backgroundColor: '#C5E1F5', /* Medium baby blue - replaces grey */
+        {/* Exact Coordinates Display & Multi-Format Navigation */}
+        <div style={{ 
+          padding: '1.5rem', 
+          backgroundColor: '#E8F4F8',
           borderRadius: '8px', 
           margin: '1rem 0',
-          textAlign: 'center'
+          textAlign: 'center',
+          border: '2px solid #4285F4'
         }}>
-          <a
-            href={googleMapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => {
-              // Verify URL is valid before opening
-              if (!googleMapsUrl || !googleMapsUrl.startsWith('https://www.google.com/maps')) {
-                e.preventDefault()
-                alert('Invalid Google Maps URL. Please try again.')
-                return false
-              }
+          <h3 style={{ marginTop: 0, marginBottom: '1rem', color: '#1a73e8' }}>
+            📍 Exact Emergency Location
+          </h3>
+          
+          {/* Coordinates Display */}
+          <div style={{
+            padding: '1rem',
+            backgroundColor: '#fff',
+            borderRadius: '6px',
+            marginBottom: '1rem',
+            fontFamily: 'monospace',
+            fontSize: '1.2rem',
+            fontWeight: 'bold',
+            color: '#1a73e8',
+            border: '1px solid #4285F4'
+          }}>
+            <div style={{ marginBottom: '0.5rem' }}>
+              <strong>Latitude:</strong> {latStr}
+            </div>
+            <div>
+              <strong>Longitude:</strong> {lngStr}
+            </div>
+            <div style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#666' }}>
+              {latStr}, {lngStr}
+            </div>
+          </div>
+
+          {/* Copy Coordinates Button */}
+          <button
+            onClick={() => copyCoordinates(latStr, lngStr)}
+            style={{
+              padding: '0.75rem 1.5rem',
+              backgroundColor: '#34a853',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '1rem',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              marginBottom: '1rem',
+              marginRight: '0.5rem'
             }}
-              style={{ 
-                display: 'inline-block', 
-                padding: '1rem 2rem',
+          >
+            📋 Copy Coordinates
+          </button>
+
+          {/* Navigation Options */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '0.75rem',
+            marginTop: '1rem'
+          }}>
+            {/* Google Maps */}
+            <a
+              href={googleMapsUrl || navUrls.googleMaps}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                // Verify URL is valid before opening
+                const url = googleMapsUrl || navUrls.googleMaps
+                if (!url || !url.startsWith('https://www.google.com/maps')) {
+                  e.preventDefault()
+                  alert('Invalid Google Maps URL. Please try again.')
+                  return false
+                }
+              }}
+              style={{
+                display: 'block',
+                padding: '1rem',
                 backgroundColor: '#4285F4',
-                color: '#F5FAFF', /* Lightest baby blue - replaces white text */
+                color: 'white',
                 textDecoration: 'none',
-                borderRadius: '8px',
-                fontSize: '1.1rem',
-                fontWeight: 'bold'
+                borderRadius: '6px',
+                fontSize: '1rem',
+                fontWeight: 'bold',
+                textAlign: 'center'
               }}
             >
-              Open in Google Maps for Directions
+              🗺️ Google Maps
+            </a>
+
+            {/* Apple Maps (iOS) */}
+            {(isIOS || !isAndroid) && (
+              <a
+                href={navUrls.appleMaps}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'block',
+                  padding: '1rem',
+                  backgroundColor: '#007AFF',
+                  color: 'white',
+                  textDecoration: 'none',
+                  borderRadius: '6px',
+                  fontSize: '1rem',
+                  fontWeight: 'bold',
+                  textAlign: 'center'
+                }}
+              >
+                🍎 Apple Maps
+              </a>
+            )}
+
+            {/* Waze */}
+            <a
+              href={navUrls.waze}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'block',
+                padding: '1rem',
+                backgroundColor: '#33CCFF',
+                color: 'white',
+                textDecoration: 'none',
+                borderRadius: '6px',
+                fontSize: '1rem',
+                fontWeight: 'bold',
+                textAlign: 'center'
+              }}
+            >
+              🧭 Waze
             </a>
           </div>
+
+          <p style={{ 
+            marginTop: '1rem', 
+            fontSize: '0.85rem', 
+            color: '#666',
+            fontStyle: 'italic'
+          }}>
+            Choose your preferred navigation app. Coordinates are exact GPS location.
+          </p>
+        </div>
           
           {/* Diagnostic Panel */}
           <div style={{ 
@@ -1660,6 +1983,133 @@ function EmergencyActive() {
         </div>
       )}
 
+      {/* Who's Coming banner - only for sender */}
+      {isSender && (
+        <div style={{
+          padding: '1rem',
+          backgroundColor: acceptedParticipants.length > 0 ? '#d4edda' : '#cce5ff',
+          borderRadius: '12px',
+          margin: '1rem 0',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Responder avatars */}
+            {acceptedParticipants.length > 0 ? (
+              <div style={{ display: 'flex', marginLeft: '4px' }}>
+                {acceptedParticipants.slice(0, 3).map((p: any, index: number) => {
+                  const colors = ['#4CAF50', '#9C27B0', '#2196F3', '#FF9800', '#00BCD4', '#E91E63']
+                  const color = colors[index % colors.length]
+                  const name = p.user_display_name || p.user_email || 'R'
+                  const initials = name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        backgroundColor: color,
+                        color: 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 'bold',
+                        fontSize: '12px',
+                        border: '2px solid white',
+                        marginLeft: index > 0 ? '-12px' : '0',
+                        zIndex: 3 - index,
+                      }}
+                      title={name}
+                    >
+                      {initials}
+                    </div>
+                  )
+                })}
+                {acceptedParticipants.length > 3 && (
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      backgroundColor: '#666',
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 'bold',
+                      fontSize: '12px',
+                      border: '2px solid white',
+                      marginLeft: '-12px',
+                    }}
+                  >
+                    +{acceptedParticipants.length - 3}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span style={{ fontSize: '24px' }}>⏳</span>
+            )}
+            
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                fontWeight: 'bold', 
+                fontSize: '1rem',
+                color: acceptedParticipants.length > 0 ? '#155724' : '#004085'
+              }}>
+                {acceptedParticipants.length > 0 
+                  ? `${acceptedParticipants.length} ${acceptedParticipants.length === 1 ? 'person' : 'people'} coming to help`
+                  : 'Waiting for responders...'}
+              </div>
+              {acceptedParticipants.length > 0 && (
+                <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '2px' }}>
+                  {acceptedParticipants.map((p: any) => p.user_display_name || p.user_email).join(', ')}
+                </div>
+              )}
+            </div>
+            
+            {/* Focus all button */}
+            {acceptedParticipants.length > 0 && mapRef.current && (
+              <button
+                onClick={() => {
+                  // Fit bounds to show all responders and sender
+                  const responderLocations = locations.filter(loc => 
+                    String(loc.user_id) !== String(emergency?.user_id)
+                  )
+                  if (responderLocations.length === 0) return
+                  
+                  const bounds = new google.maps.LatLngBounds()
+                  
+                  // Add sender location
+                  if (senderLocation) {
+                    bounds.extend({ lat: senderLocation.latitude, lng: senderLocation.longitude })
+                  }
+                  
+                  // Add all responder locations
+                  responderLocations.forEach(loc => {
+                    bounds.extend({ lat: loc.latitude, lng: loc.longitude })
+                  })
+                  
+                  mapRef.current?.fitBounds(bounds, 80)
+                }}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#4A90E2',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                📍 Show All
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Google Maps directions - only for responders */}
       {googleMapsButton}
 
@@ -1672,11 +2122,60 @@ function EmergencyActive() {
         {acceptedParticipants.length > 0 && (
           <div className="participant-group">
             <h3>✅ Responding ({acceptedParticipants.length})</h3>
-            {acceptedParticipants.map((p: any) => (
-              <div key={p.id} className="participant accepted">
-                {p.user_display_name || p.user_email || 'Responder'} - Responding
-              </div>
-            ))}
+            {acceptedParticipants.map((p: any, index: number) => {
+              // Find this responder's location
+              const responderLoc = locations.find(loc => String(loc.user_id) === String(p.user_id))
+              const colors = ['#4CAF50', '#9C27B0', '#2196F3', '#FF9800', '#00BCD4', '#E91E63']
+              const color = colors[index % colors.length]
+              const name = p.user_display_name || p.user_email || 'Responder'
+              const initials = name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
+              
+              return (
+                <div 
+                  key={p.id} 
+                  className="participant accepted"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    cursor: responderLoc && mapRef.current ? 'pointer' : 'default',
+                  }}
+                  onClick={() => {
+                    if (responderLoc && mapRef.current) {
+                      mapRef.current.panTo({ lat: responderLoc.latitude, lng: responderLoc.longitude })
+                      mapRef.current.setZoom(16)
+                    }
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      backgroundColor: color,
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 'bold',
+                      fontSize: '11px',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {initials}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: '500' }}>{name}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#666' }}>
+                      {responderLoc ? '📍 Tap to focus on map' : '⏳ Waiting for location...'}
+                    </div>
+                  </div>
+                  {responderLoc && (
+                    <span style={{ fontSize: '1.2rem' }}>📍</span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 

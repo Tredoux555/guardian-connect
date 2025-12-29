@@ -143,13 +143,19 @@ export const playEmergencySound = (): void => {
     }
     emergencySoundGain = null;
     
-    // Reuse existing AudioContext or create new one
-    if (!emergencySoundContext || emergencySoundContext.state === 'closed') {
-      emergencySoundContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      console.log('✅ AudioContext created, state:', emergencySoundContext.state);
-    } else {
-      console.log('✅ Reusing existing AudioContext, state:', emergencySoundContext.state);
+    // CRITICAL: Always create a fresh AudioContext for mobile compatibility
+    // Reusing contexts can cause issues on mobile devices
+    if (emergencySoundContext && emergencySoundContext.state !== 'closed') {
+      try {
+        emergencySoundContext.close();
+      } catch (e) {
+        // Ignore errors when closing
+      }
     }
+    
+    // Create new AudioContext (mobile browsers require this)
+    emergencySoundContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    console.log('✅ AudioContext created, state:', emergencySoundContext.state);
     
     // Function to start the tone (called after context is resumed if needed)
     const startTone = () => {
@@ -159,7 +165,7 @@ export const playEmergencySound = (): void => {
       }
       
       try {
-        // Generate continuous, loud, attention-grabbing tone
+        // Generate continuous, loud, attention-grabbing tone (1000Hz sine wave)
         emergencySoundOscillator = emergencySoundContext.createOscillator();
         emergencySoundGain = emergencySoundContext.createGain();
         
@@ -167,7 +173,7 @@ export const playEmergencySound = (): void => {
         emergencySoundGain.connect(emergencySoundContext.destination);
         
         // Configure for loud, urgent, continuous sound
-        emergencySoundOscillator.frequency.value = 1000; // Higher frequency for more urgency
+        emergencySoundOscillator.frequency.value = 1000; // 1000Hz for clear, attention-grabbing tone
         emergencySoundOscillator.type = 'sine';
         
         // Set volume to maximum allowed (browsers limit to ~0.5 for safety, but we try higher)
@@ -175,21 +181,23 @@ export const playEmergencySound = (): void => {
         
         // Start the continuous tone - it will play until stop() is called
         emergencySoundOscillator.start();
-        console.log('🔊 Emergency tone started successfully');
+        console.log('🔊 Emergency tone (1000Hz) started successfully');
       } catch (err) {
         console.error('❌ Error starting oscillator:', err);
       }
     };
     
-    // CRITICAL: Resume AudioContext if suspended (browsers require user interaction)
+    // CRITICAL: Resume AudioContext if suspended (mobile browsers require user interaction)
+    // On mobile, AudioContext ALWAYS starts suspended - we MUST resume it
     if (emergencySoundContext.state === 'suspended') {
-      console.log('⏸️ AudioContext is suspended, attempting to resume...');
+      console.log('⏸️ AudioContext is suspended (mobile), attempting to resume...');
       emergencySoundContext.resume().then(() => {
-        console.log('✅ AudioContext resumed successfully');
+        console.log('✅ AudioContext resumed successfully, starting tone...');
         startTone();
       }).catch((err) => {
         console.error('❌ Failed to resume AudioContext:', err);
         // Try to start anyway - sometimes it works even if resume fails
+        console.log('⚠️ Attempting to start tone anyway...');
         startTone();
       });
     } else {
@@ -198,15 +206,26 @@ export const playEmergencySound = (): void => {
     }
     
     // Also try to play a sound file in a continuous loop if available
+    // This works better on mobile than generated tones in some cases
     try {
       emergencySoundAudio = new Audio('/emergency-alert.mp3');
       emergencySoundAudio.volume = 1.0; // Maximum volume
       emergencySoundAudio.loop = true; // Loop continuously
-      emergencySoundAudio.play().then(() => {
-        console.log('✅ Sound file playing');
-      }).catch((err) => {
-        console.log('⚠️ Sound file not available, using generated continuous tone:', err);
-      });
+      // Set preload for better mobile compatibility
+      emergencySoundAudio.preload = 'auto';
+      
+      // For mobile, we need to handle play() promise carefully
+      const playPromise = emergencySoundAudio.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            console.log('✅ Sound file playing (mobile-friendly)');
+          })
+          .catch((err) => {
+            console.log('⚠️ Sound file play failed (will use generated 1000Hz tone):', err);
+            // Sound file failed, but generated tone should still work
+          });
+      }
     } catch (err) {
       console.log('⚠️ Could not create Audio element:', err);
       // Sound file not available, generated tone is playing
