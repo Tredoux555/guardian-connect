@@ -30,12 +30,23 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// CORS - allow all origins for Railway deployment
+// CORS preflight handler - must be before CORS middleware
+app.options('*', cors());
+
+// CORS configuration - allow specific origins for Railway deployment
 app.use(cors({
-  origin: true, // Allow ALL origins
+  origin: [
+    'https://guardian-connect-production.up.railway.app',
+    'https://guardian-connect.up.railway.app',
+    /\.railway\.app$/,
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5173'
+  ],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
