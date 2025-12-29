@@ -233,7 +233,7 @@ function EmergencyActive() {
   if (loading) {
     return (
       <div className="emergency-active">
-        <div className="loading">Loading emergency...</div>
+        <div className="loading-container">Loading emergency...</div>
       </div>
     )
   }
@@ -241,7 +241,7 @@ function EmergencyActive() {
   if (error) {
     return (
       <div className="emergency-active">
-        <div className="error">{error}</div>
+        <div className="error-container">{error}</div>
       </div>
     )
   }
@@ -249,32 +249,28 @@ function EmergencyActive() {
   return (
     <div className="emergency-active">
       {/* Header */}
-      <div className="emergency-header" style={{ background: '#dc3545', color: 'white', padding: '15px', textAlign: 'center' }}>
-        <h1 style={{ margin: 0, fontSize: '1.5rem' }}>🚨 EMERGENCY ACTIVE</h1>
-        <p style={{ margin: '5px 0 0 0', fontSize: '0.9rem' }}>
+      <div className="emergency-header">
+        <h1>🚨 EMERGENCY ACTIVE</h1>
+        <p>
           {isSender ? 'Help is on the way!' : `${emergency?.sender_display_name || emergency?.sender_email || 'Someone'} needs help!`}
         </p>
       </div>
 
+      {/* Connection Status */}
+      <div className="connection-status">
+        <div className="status-dot"></div>
+        <span className="status-text">Connected • {locations.length} people tracking</span>
+      </div>
+
       {/* Location Section */}
-      <div style={{ padding: '15px', background: '#f8f9fa' }}>
-        <h3 style={{ margin: '0 0 10px 0' }}>📍 Locations</h3>
+      <div className="location-section">
+        <h3 className="section-title">📍 Locations</h3>
         
         {/* Share Location Button */}
         <button
           onClick={shareLocation}
           disabled={sharingLocation}
-          style={{
-            width: '100%',
-            padding: '12px',
-            marginBottom: '15px',
-            background: myLocation ? '#28a745' : '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            fontSize: '1rem',
-            cursor: 'pointer'
-          }}
+          className={`btn-share-location ${myLocation ? 'shared' : ''}`}
         >
           {sharingLocation ? 'Sharing...' : myLocation ? '✓ Location Shared - Tap to Update' : 'Share My Location'}
         </button>
@@ -287,27 +283,16 @@ function EmergencyActive() {
               parseFloat(String(senderLocation.longitude)),
               emergency?.sender_display_name || 'Emergency'
             )}
-            style={{
-              width: '100%',
-              padding: '15px',
-              marginBottom: '10px',
-              background: '#dc3545',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '1.1rem',
-              fontWeight: 'bold',
-              cursor: 'pointer'
-            }}
+            className="btn-navigate-main"
           >
             🧭 NAVIGATE TO {(emergency?.sender_display_name || 'PERSON IN NEED').toUpperCase()}
           </button>
         )}
 
         {/* Location List */}
-        <div style={{ marginTop: '10px' }}>
+        <div>
           {locations.length === 0 ? (
-            <p style={{ color: '#666', textAlign: 'center' }}>No locations shared yet</p>
+            <p className="no-locations">No locations shared yet</p>
           ) : (
             locations.map((loc, index) => {
               const isCurrentUser = String(loc.user_id) === String(currentUserId)
@@ -316,21 +301,12 @@ function EmergencyActive() {
               return (
                 <div
                   key={index}
-                  style={{
-                    padding: '10px',
-                    marginBottom: '8px',
-                    background: isEmergencySender ? '#ffe6e6' : 'white',
-                    borderRadius: '8px',
-                    border: '1px solid #ddd',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}
+                  className={`location-card ${isEmergencySender ? 'sender' : ''} ${isCurrentUser ? 'you' : ''}`}
                 >
-                  <div>
+                  <div className="location-info">
                     <strong>{loc.user_display_name || loc.user_email || 'Unknown'}</strong>
-                    {isEmergencySender && <span style={{ color: '#dc3545', marginLeft: '5px' }}>(Needs Help)</span>}
-                    {isCurrentUser && <span style={{ color: '#28a745', marginLeft: '5px' }}>(You)</span>}
+                    {isEmergencySender && <span className="location-badge needs-help">Needs Help</span>}
+                    {isCurrentUser && <span className="location-badge you-badge">You</span>}
                   </div>
                   {!isCurrentUser && (
                     <button
@@ -339,14 +315,7 @@ function EmergencyActive() {
                         parseFloat(String(loc.longitude)),
                         loc.user_display_name || 'Location'
                       )}
-                      style={{
-                        padding: '8px 15px',
-                        background: '#007bff',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '5px',
-                        cursor: 'pointer'
-                      }}
+                      className="btn-navigate-small"
                     >
                       Navigate
                     </button>
@@ -359,43 +328,18 @@ function EmergencyActive() {
       </div>
 
       {/* Chat Section */}
-      <div style={{ padding: '15px', flex: 1 }}>
-        <h3 style={{ margin: '0 0 10px 0' }}>💬 Group Chat</h3>
+      <div className="chat-section">
+        <h3 className="section-title">💬 Group Chat</h3>
         <EmergencyChat emergencyId={id!} />
       </div>
 
       {/* Action Buttons (Sender Only) */}
       {isSender && (
-        <div style={{ padding: '15px', background: '#f8f9fa', display: 'flex', gap: '10px' }}>
-          <button
-            onClick={endEmergency}
-            style={{
-              flex: 1,
-              padding: '15px',
-              background: '#28a745',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '1rem',
-              fontWeight: 'bold',
-              cursor: 'pointer'
-            }}
-          >
+        <div className="action-buttons">
+          <button onClick={endEmergency} className="btn-safe">
             ✓ I'M SAFE - End Emergency
           </button>
-          <button
-            onClick={cancelEmergency}
-            style={{
-              flex: 1,
-              padding: '15px',
-              background: '#6c757d',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '1rem',
-              cursor: 'pointer'
-            }}
-          >
+          <button onClick={cancelEmergency} className="btn-cancel">
             Cancel
           </button>
         </div>
@@ -403,23 +347,17 @@ function EmergencyActive() {
 
       {/* Back Button (Responder) */}
       {!isSender && (
-        <div style={{ padding: '15px', background: '#f8f9fa' }}>
-          <button
-            onClick={() => navigate('/')}
-            style={{
-              width: '100%',
-              padding: '12px',
-              background: '#6c757d',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer'
-            }}
-          >
+        <div className="action-buttons">
+          <button onClick={() => navigate('/')} className="btn-back">
             Back to Home
           </button>
         </div>
       )}
+
+      {/* Jeffy Branding */}
+      <div className="powered-by">
+        Powered by <span>Jeffy</span>
+      </div>
     </div>
   )
 }
