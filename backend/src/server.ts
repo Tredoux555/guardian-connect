@@ -29,52 +29,10 @@ initializeSocket(httpServer);
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
-// CORS configuration - allow all localhost ports for development
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()) || [
-  // Production domains
-  'https://app.guardianconnect.icu',
-  'https://admin.guardianconnect.icu',
-  'https://guardianconnect.icu',
-  // Railway domains
-  'https://web-user-production.up.railway.app',
-  'https://back-end-production-4a69.up.railway.app',
-  // Development (localhost)
-  'http://localhost:3002', // Admin panel (default)
-  'http://localhost:3003', // Web user interface (default)
-  'http://localhost:3004', // Admin panel (alternative port)
-  'http://localhost:3005', // Web user interface (alternative port)
-  'http://localhost:3000', // Backend API (matches mobile app)
-];
 
+// CORS - allow all origins for Railway deployment
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) {
-      console.log('✅ CORS: Allowing request with no origin');
-      return callback(null, true);
-    }
-    
-    // Allow ALL railway.app domains
-    if (origin.endsWith('.railway.app')) {
-      console.log('✅ CORS: Allowing Railway origin:', origin);
-      return callback(null, true);
-    }
-    
-    // In development, allow ALL origins for easier testing
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('✅ CORS: Allowing origin in development:', origin);
-      return callback(null, true);
-    }
-    
-    // In production, check allowed origins
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      console.log('✅ CORS: Allowing origin from allowed list:', origin);
-      callback(null, true);
-    } else {
-      console.warn('❌ CORS: Blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: true, // Allow ALL origins
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
