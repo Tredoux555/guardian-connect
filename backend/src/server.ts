@@ -35,6 +35,9 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()
   'https://app.guardianconnect.icu',
   'https://admin.guardianconnect.icu',
   'https://guardianconnect.icu',
+  // Railway domains
+  'https://web-user-production.up.railway.app',
+  'https://back-end-production-4a69.up.railway.app',
   // Development (localhost)
   'http://localhost:3002', // Admin panel (default)
   'http://localhost:3003', // Web user interface (default)
@@ -51,8 +54,13 @@ app.use(cors({
       return callback(null, true);
     }
     
+    // Allow ALL railway.app domains
+    if (origin.endsWith('.railway.app')) {
+      console.log('✅ CORS: Allowing Railway origin:', origin);
+      return callback(null, true);
+    }
+    
     // In development, allow ALL origins for easier testing
-    // This prevents CORS issues when frontend and backend are on different IPs/ports
     if (process.env.NODE_ENV !== 'production') {
       console.log('✅ CORS: Allowing origin in development:', origin);
       return callback(null, true);
