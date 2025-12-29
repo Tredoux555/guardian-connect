@@ -36,6 +36,8 @@ app.options('*', cors());
 // CORS configuration - allow specific origins for Railway deployment
 app.use(cors({
   origin: [
+    'https://web-user-production.up.railway.app',
+    'https://back-end-production-4a69.up.railway.app',
     'https://guardian-connect-production.up.railway.app',
     'https://guardian-connect.up.railway.app',
     /\.railway\.app$/,
