@@ -156,7 +156,7 @@ export const sendEmergencyAlert = async (
               'loc-key': 'EMERGENCY_ALERT',
             },
             sound: {
-              critical: 1, // Critical alert - bypasses silent mode
+              critical: true, // Critical alert - bypasses silent mode
               name: 'default',
               volume: 1.0, // Maximum volume
             },

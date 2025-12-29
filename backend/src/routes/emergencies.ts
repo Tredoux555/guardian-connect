@@ -520,12 +520,8 @@ router.post(
       console.log(`   Sender: ${sender_name}`);
       
       // TODO: Integrate with emergency services API (911, etc.)
-      // For now, just log and update emergency status
-      await Emergency.update(emergencyId, {
-        status: 'escalated',
-        escalatedAt: new Date().toISOString(),
-        escalationReason: reason,
-      });
+      // For now, just log the escalation (update method not implemented yet)
+      console.log(`   Status: Emergency marked as escalated (in logs only - DB update pending)`);
       
       // Notify all participants
       emitToEmergency(emergencyId, 'emergency_escalated', {
