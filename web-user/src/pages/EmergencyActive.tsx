@@ -353,6 +353,21 @@ function EmergencyActive() {
       // Process locations with validation
       const locationsData = response.data.locations || []
       
+      // STEP 4: Log raw locations received from API
+      console.log('🔍 [COORDINATE TRACE] Step 4 - Locations received from API:', {
+        count: locationsData.length,
+        locations: locationsData.map((loc: any) => ({
+          userId: loc.user_id,
+          rawLatitude: loc.latitude,
+          rawLongitude: loc.longitude,
+          latitudeType: typeof loc.latitude,
+          longitudeType: typeof loc.longitude,
+          latitudeString: String(loc.latitude),
+          longitudeString: String(loc.longitude),
+          timestamp: loc.timestamp
+        }))
+      })
+      
       // Validate and filter locations using unified coordinate parsing
       const validLocations = locationsData.filter((loc: Location) => {
         if (!loc || !loc.user_id) return false
@@ -361,6 +376,20 @@ function EmergencyActive() {
         return !isNaN(lat) && !isNaN(lng) && 
                lat >= -90 && lat <= 90 && 
                lng >= -180 && lng <= 180
+      })
+      
+      // STEP 5: Log parsed coordinates
+      console.log('🔍 [COORDINATE TRACE] Step 5 - Parsed coordinates:', {
+        count: validLocations.length,
+        locations: validLocations.map((loc: Location) => ({
+          userId: loc.user_id,
+          rawLat: loc.latitude,
+          rawLng: loc.longitude,
+          parsedLat: parseCoordinate(loc.latitude),
+          parsedLng: parseCoordinate(loc.longitude),
+          formattedLat: formatCoordinate(parseCoordinate(loc.latitude)),
+          formattedLng: formatCoordinate(parseCoordinate(loc.longitude))
+        }))
       })
       
       // Remove duplicate locations by user_id (keep most recent)
@@ -375,6 +404,19 @@ function EmergencyActive() {
         )
         if (senderLoc) {
           setSenderLocation(senderLoc)
+          
+          // STEP 6: Log sender location details
+          const senderParsedLat = parseCoordinate(senderLoc.latitude)
+          const senderParsedLng = parseCoordinate(senderLoc.longitude)
+          const senderFormattedLat = formatCoordinate(senderParsedLat)
+          const senderFormattedLng = formatCoordinate(senderParsedLng)
+          
+          console.log('🔍 [COORDINATE TRACE] Step 6 - Sender location (final):', {
+            raw: { lat: senderLoc.latitude, lng: senderLoc.longitude },
+            parsed: { lat: senderParsedLat, lng: senderParsedLng },
+            formatted: { lat: senderFormattedLat, lng: senderFormattedLng },
+            willBeUsedInURL: `${senderFormattedLat},${senderFormattedLng}`
+          })
         }
         
         setLocations(uniqueLocations)
@@ -617,9 +659,25 @@ function EmergencyActive() {
     destLng: string | number
   ): string => {
     try {
+      // STEP 7: Log input coordinates before formatting
+      console.log('🔍 [COORDINATE TRACE] Step 7 - getGoogleMapsUrl called with:', {
+        originLat: { value: originLat, type: typeof originLat, string: String(originLat) },
+        originLng: { value: originLng, type: typeof originLng, string: String(originLng) },
+        destLat: { value: destLat, type: typeof destLat, string: String(destLat) },
+        destLng: { value: destLng, type: typeof destLng, string: String(destLng) }
+      })
+      
       // Format all coordinates as strings with exact precision
       const formattedDestLat = formatCoordinate(destLat)
       const formattedDestLng = formatCoordinate(destLng)
+      
+      // STEP 8: Log formatted coordinates
+      console.log('🔍 [COORDINATE TRACE] Step 8 - Formatted coordinates:', {
+        formattedDestLat: { value: formattedDestLat, precision: formattedDestLat.split('.')[1]?.length || 0 },
+        formattedDestLng: { value: formattedDestLng, precision: formattedDestLng.split('.')[1]?.length || 0 },
+        inputDestLat: { value: destLat, type: typeof destLat },
+        inputDestLng: { value: destLng, type: typeof destLng }
+      })
       
       // Validate destination coordinates
       if (formattedDestLat === '0' || formattedDestLng === '0') {
@@ -634,31 +692,82 @@ function EmergencyActive() {
         // URL-encode the exact coordinate string
         const destCoords = `${formattedDestLat},${formattedDestLng}`
         const encodedDest = encodeURIComponent(destCoords)
-        return `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+        const finalUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+        
+        // STEP 9: Log final URL for mobile
+        console.log('🔍 [COORDINATE TRACE] Step 9 - Final Google Maps URL (Mobile):', {
+          url: finalUrl,
+          destinationCoords: destCoords,
+          encodedDestination: encodedDest,
+          formattedLat: formattedDestLat,
+          formattedLng: formattedDestLng,
+          userAgent: navigator.userAgent,
+          isMobile: true
+        })
+        
+        return finalUrl
       } else {
         // On desktop: Use exact origin and destination
         const formattedOriginLat = formatCoordinate(originLat)
         const formattedOriginLng = formatCoordinate(originLng)
         
+        // STEP 8b: Log formatted origin coordinates
+        console.log('🔍 [COORDINATE TRACE] Step 8b - Formatted origin coordinates (Desktop):', {
+          formattedOriginLat: { value: formattedOriginLat, precision: formattedOriginLat.split('.')[1]?.length || 0 },
+          formattedOriginLng: { value: formattedOriginLng, precision: formattedOriginLng.split('.')[1]?.length || 0 },
+          inputOriginLat: { value: originLat, type: typeof originLat },
+          inputOriginLng: { value: originLng, type: typeof originLng }
+        })
+        
         // Validate origin
         if (formattedOriginLat === '0' || formattedOriginLng === '0') {
           const destCoords = `${formattedDestLat},${formattedDestLng}`
           const encodedDest = encodeURIComponent(destCoords)
-          return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+          const finalUrl = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+          
+          console.log('🔍 [COORDINATE TRACE] Step 9b - Final URL (Desktop, no origin):', {
+            url: finalUrl,
+            reason: 'Invalid origin coordinates'
+          })
+          
+          return finalUrl
         }
         
         // Check if origin and destination are identical
         if (formattedOriginLat === formattedDestLat && formattedOriginLng === formattedDestLng) {
           const destCoords = `${formattedDestLat},${formattedDestLng}`
           const encodedDest = encodeURIComponent(destCoords)
-          return `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+          const finalUrl = `https://www.google.com/maps/search/?api=1&query=${encodedDest}`
+          
+          console.log('🔍 [COORDINATE TRACE] Step 9b - Final URL (Desktop, same location):', {
+            url: finalUrl,
+            reason: 'Origin and destination are identical'
+          })
+          
+          return finalUrl
         }
         
         const originCoords = `${formattedOriginLat},${formattedOriginLng}`
         const destCoords = `${formattedDestLat},${formattedDestLng}`
         const encodedOrigin = encodeURIComponent(originCoords)
         const encodedDest = encodeURIComponent(destCoords)
-        return `https://www.google.com/maps/dir/?api=1&origin=${encodedOrigin}&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+        const finalUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodedOrigin}&destination=${encodedDest}&travelmode=driving&dir_action=navigate`
+        
+        // STEP 9b: Log final URL for desktop
+        console.log('🔍 [COORDINATE TRACE] Step 9b - Final Google Maps URL (Desktop):', {
+          url: finalUrl,
+          originCoords: originCoords,
+          destinationCoords: destCoords,
+          encodedOrigin: encodedOrigin,
+          encodedDestination: encodedDest,
+          formattedOriginLat: formattedOriginLat,
+          formattedOriginLng: formattedOriginLng,
+          formattedDestLat: formattedDestLat,
+          formattedDestLng: formattedDestLng,
+          isMobile: false
+        })
+        
+        return finalUrl
       }
       
     } catch (error) {

@@ -232,14 +232,16 @@ router.post(
       const userId = req.userId!;
       const { latitude, longitude } = req.body;
 
-      // Log received coordinates for debugging
-      console.log('📍 Location received from client:', {
+      // STEP 2: Log received coordinates from client (detailed)
+      console.log('🔍 [COORDINATE TRACE] Step 2 - Backend received from client:', {
         emergencyId,
         userId,
-        latitude,
-        longitude,
+        receivedLatitude: latitude,
+        receivedLongitude: longitude,
         latitudeType: typeof latitude,
         longitudeType: typeof longitude,
+        latitudeString: String(latitude),
+        longitudeString: String(longitude),
         timestamp: new Date().toISOString()
       });
 
@@ -260,24 +262,40 @@ router.post(
         });
       }
 
-      // Validate coordinates before storing
+      // STEP 3: Validate and parse coordinates before storing
       const lat = typeof latitude === 'string' ? parseFloat(latitude) : Number(latitude);
       const lng = typeof longitude === 'string' ? parseFloat(longitude) : Number(longitude);
+      
+      console.log('🔍 [COORDINATE TRACE] Step 3 - Backend parsed coordinates:', {
+        receivedLat: latitude,
+        receivedLng: longitude,
+        parsedLat: lat,
+        parsedLng: lng,
+        latIsNaN: isNaN(lat),
+        lngIsNaN: isNaN(lng),
+        latPrecision: lat.toString().split('.')[1]?.length || 0,
+        lngPrecision: lng.toString().split('.')[1]?.length || 0
+      });
       
       if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
         console.error('❌ Invalid coordinates received:', { latitude, longitude, lat, lng });
         return res.status(400).json({ error: 'Invalid coordinates' });
       }
 
-      // Add location (database stores as DECIMAL(10,8) and DECIMAL(11,8))
+      // STEP 4: Store in database (DECIMAL(10,8) and DECIMAL(11,8))
       await Emergency.addLocation(emergencyId, userId, lat, lng);
       
-      console.log('✅ Location stored in database:', {
+      console.log('🔍 [COORDINATE TRACE] Step 4 - Backend stored in database:', {
         emergencyId,
         userId,
         storedLatitude: lat,
         storedLongitude: lng,
-        databasePrecision: 'DECIMAL(10,8) for latitude, DECIMAL(11,8) for longitude'
+        storedLatType: typeof lat,
+        storedLngType: typeof lng,
+        storedLatString: String(lat),
+        storedLngString: String(lng),
+        databasePrecision: 'DECIMAL(10,8) for latitude, DECIMAL(11,8) for longitude',
+        note: 'PostgreSQL will store with exact precision, but may return as string or number'
       });
 
       // Get user's display name and email for socket event

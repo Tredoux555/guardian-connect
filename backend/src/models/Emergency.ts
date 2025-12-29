@@ -121,9 +121,9 @@ export class Emergency {
       [emergencyId]
     );
     
-    // Log retrieved locations for debugging
+    // STEP 5: Log retrieved locations from database (detailed)
     if (result.rows.length > 0) {
-      console.log('📍 Locations retrieved from database:', {
+      console.log('🔍 [COORDINATE TRACE] Step 5 - Backend retrieved from database:', {
         emergencyId,
         count: result.rows.length,
         locations: result.rows.map((row: any) => ({
@@ -132,7 +132,12 @@ export class Emergency {
           longitude: row.longitude,
           latitudeType: typeof row.latitude,
           longitudeType: typeof row.longitude,
-          timestamp: row.timestamp
+          latitudeString: String(row.latitude),
+          longitudeString: String(row.longitude),
+          latitudePrecision: String(row.latitude).split('.')[1]?.length || 0,
+          longitudePrecision: String(row.longitude).split('.')[1]?.length || 0,
+          timestamp: row.timestamp,
+          note: 'These values will be sent to frontend in API response'
         }))
       });
     }
