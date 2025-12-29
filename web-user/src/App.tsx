@@ -13,7 +13,6 @@ import { FEATURES } from './utils/featureFlags'
 import { registerServiceWorker, requestNotificationPermission, subscribeToPushNotifications, showEmergencyNotification, playEmergencySound, stopEmergencySound } from './services/notifications'
 import { connectSocket, onEmergencyCreated, removeListener } from './services/socket'
 import { getCurrentUserId } from './utils/jwt'
-import { GoogleMapsLoader } from './components/GoogleMapsLoader'
 import './App.css'
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -101,47 +100,45 @@ function App() {
   }, [])
 
   return (
-    <GoogleMapsLoader>
-      <Router
-        future={{
-          v7_startTransition: true,
-          v7_relativeSplatPath: true
-        }}
-      >
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-          <Route path="/emergency/:id" element={<ProtectedRoute><EmergencyActive /></ProtectedRoute>} />
-          <Route path="/respond/:id" element={<ProtectedRoute><EmergencyResponse /></ProtectedRoute>} />
-          <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
-          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-          {FEATURES.donations && (
-            <Route 
-              path="/donations" 
-              element={
-                <ProtectedRoute>
-                  <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}>
-                    <Donations />
-                  </Suspense>
-                </ProtectedRoute>
-              } 
-            />
-          )}
-          {FEATURES.subscriptions && (
-            <Route 
-              path="/subscriptions" 
-              element={
-                <ProtectedRoute>
-                  <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}>
-                    <Subscriptions />
-                  </Suspense>
-                </ProtectedRoute>
-              } 
-            />
-          )}
-        </Routes>
-      </Router>
-    </GoogleMapsLoader>
+    <Router
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true
+      }}
+    >
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+        <Route path="/emergency/:id" element={<ProtectedRoute><EmergencyActive /></ProtectedRoute>} />
+        <Route path="/respond/:id" element={<ProtectedRoute><EmergencyResponse /></ProtectedRoute>} />
+        <Route path="/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+        {FEATURES.donations && (
+          <Route 
+            path="/donations" 
+            element={
+              <ProtectedRoute>
+                <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}>
+                  <Donations />
+                </Suspense>
+              </ProtectedRoute>
+            } 
+          />
+        )}
+        {FEATURES.subscriptions && (
+          <Route 
+            path="/subscriptions" 
+            element={
+              <ProtectedRoute>
+                <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Loading...</div>}>
+                  <Subscriptions />
+                </Suspense>
+              </ProtectedRoute>
+            } 
+          />
+        )}
+      </Routes>
+    </Router>
   )
 }
 
