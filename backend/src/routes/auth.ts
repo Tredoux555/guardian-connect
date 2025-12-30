@@ -146,7 +146,8 @@ router.post(
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      if (!user.verified) {
+      // Allow unverified users in development for testing
+      if (!user.verified && process.env.NODE_ENV === 'production') {
         return res.status(403).json({ error: 'Please verify your email before logging in' });
       }
 
