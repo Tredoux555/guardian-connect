@@ -351,5 +351,31 @@ router.post(
   }
 );
 
+// DEV ONLY: Manually verify a user by email (for testing)
+router.post('/dev-verify', async (req: Request, res: Response) => {
+  // Only allow in non-production
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ error: 'Not available in production' });
+  }
+  
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email required' });
+    }
+    
+    const user = await User.findByEmail(email);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    await User.verifyEmail(user.id);
+    res.json({ message: 'User verified successfully', email });
+  } catch (error) {
+    console.error('Dev verify error:', error);
+    res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
 export default router;
 
