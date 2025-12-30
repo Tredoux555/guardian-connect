@@ -47,7 +47,17 @@ function Login() {
         if (response.data.accessToken && response.data.refreshToken) {
           localStorage.setItem('access_token', response.data.accessToken)
           localStorage.setItem('refresh_token', response.data.refreshToken)
-          navigate('/')
+          
+          // Validate token works before navigating
+          try {
+            await api.get('/user/me')
+            navigate('/')
+          } catch (validationError) {
+            console.error('Token validation failed:', validationError)
+            localStorage.removeItem('access_token')
+            localStorage.removeItem('refresh_token')
+            setError('Login succeeded but token validation failed. Please try again.')
+          }
         } else {
           setError('Invalid response from server')
         }
