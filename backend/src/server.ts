@@ -101,9 +101,23 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check with database verification
+app.get('/health', async (req, res) => {
+  try {
+    await query('SELECT 1');
+    res.json({ 
+      status: 'ok', 
+      timestamp: new Date().toISOString(),
+      database: 'connected'
+    });
+  } catch (error) {
+    console.error('❌ Health check database error:', error);
+    res.status(503).json({ 
+      status: 'degraded', 
+      timestamp: new Date().toISOString(),
+      database: 'error'
+    });
+  }
 });
 
 // Routes
@@ -209,6 +223,17 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
+});
+
+// Global error handlers - prevent crashes from unhandled errors
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  console.error('❌ UNHANDLED PROMISE REJECTION:', reason);
+});
+
+process.on('uncaughtException', (error: Error) => {
+  console.error('❌ UNCAUGHT EXCEPTION:', error);
+  // Give time to log, then exit (Railway will restart)
+  setTimeout(() => process.exit(1), 1000);
 });
 
 // Listen on all interfaces (0.0.0.0) to allow network access
