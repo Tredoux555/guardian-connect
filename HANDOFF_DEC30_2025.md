@@ -1,78 +1,61 @@
 # Guardian Connect - Handoff Document
-## Date: 2025-12-30 00:20
+## Date: 2025-12-30 22:15 (Updated)
 
 ## Current Status
-**BLOCKED** - Backend build failing on Railway
+**WORKING** - Backend deployed, login functional
 
-## The Problem
-CORS error preventing login - frontend can't talk to backend.
+## What Was Fixed
+1. **CORS** - Working (allow all origins)
+2. **Email verification** - Temporarily disabled for testing (TODO: re-enable)
+3. **Backend health** - ✅ Responding at /health
+4. **Database** - ✅ Connected
 
-## What Was Done
-1. Created simplified EmergencyActive page (removed Google Maps API dependency)
-2. Added Jeffy dark theme (orange accents, dark background)
-3. Fixed CORS to allow all origins (`origin: true`)
-4. Moved typescript to dependencies (was in devDependencies)
-5. Changed build script to `npx tsc`
-
-## Last Commit
-```
-3f40d55 Fix build: Move typescript to dependencies, use npx tsc
-```
-
-## What Needs to Happen
-1. Wait for Railway to rebuild backend (check Deployments tab)
-2. If build still fails, check logs for error
-3. Once backend deploys successfully, test login at:
-   https://web-user-production.up.railway.app/login
-4. Test credentials: user1@example.com / password123
+## Test Credentials
+- **Email:** test@test.com
+- **Password:** password123
 
 ## Railway URLs
-- **Project:** https://railway.com/project/1bd2d2cd-3961-496e-aec4-406baafbf8e0
-- **Backend:** https://back-end-production-4a69.up.railway.app
 - **Frontend:** https://web-user-production.up.railway.app
+- **Backend:** https://back-end-production-4a69.up.railway.app
+- **Project:** https://railway.com/project/1bd2d2cd-3961-496e-aec4-406baafbf8e0
 
-## Database
-- PostgreSQL on Railway (already set up, schema applied)
-- Connection via DATABASE_URL environment variable
+## API Endpoints Verified Working
+- `GET /health` - Returns `{"status":"ok","database":"connected"}`
+- `POST /api/auth/register` - Creates new user
+- `POST /api/auth/login` - Returns tokens (verification disabled)
 
 ## Repository
-- GitHub: https://github.com/Tredoux555/guardian-connect
-- Local: ~/Documents/GitHub/guardian-connect
+- **GitHub:** https://github.com/Tredoux555/guardian-connect
+- **Local:** ~/Documents/GitHub/guardian-connect
 
-## Key Files Modified
-- backend/src/server.ts - CORS fix (allow all origins)
-- backend/package.json - typescript in dependencies
-- web-user/src/pages/EmergencyActive.tsx - simplified, no Google Maps
-- web-user/src/pages/EmergencyActive.css - Jeffy dark theme
-- web-user/src/pages/Login.css - Jeffy dark theme
-
-## If Build Keeps Failing
-Option 1: Pre-compile locally and push dist folder
-```bash
-cd ~/Documents/GitHub/guardian-connect/backend
-npm install
-npm run build
-# Then add dist/ to git and push
+## Recent Commits
+```
+d1b69fc Temporarily disable email verification for testing
+d7710e9 Add dev-verify endpoint for testing
+8ad8735 Allow unverified login in dev mode for testing
+891b9c8 fix: validate token after login before navigating
 ```
 
-Option 2: Check Railway build logs for specific error
+## TODO Before Production
+1. Re-enable email verification in backend/src/routes/auth.ts
+2. Configure email service (SendGrid/etc)
+3. Restrict CORS to specific domains
+4. Set up proper environment variables
 
-## Test Users (need to be created in DB)
-- user1@example.com / password123
-- user2@example.com / password123
+## Next Steps to Test
+1. Login at /login with test credentials
+2. Test emergency creation
+3. Test emergency contacts
+4. Test group chat
+5. Test push notifications
 
-These may not exist yet - check database or register new users.
+## Tech Stack
+- **Frontend:** React + Vite + TypeScript
+- **Backend:** Node.js + Express + TypeScript
+- **Database:** PostgreSQL on Railway
+- **Hosting:** Railway
 
-## Features Working
-- ✅ Dark theme UI
-- ✅ Database schema
-- ✅ Simplified emergency flow (no Google Maps)
-- ⏳ Backend deployment (in progress)
-- ⏳ Login functionality (blocked by backend)
-
-## Next Steps After Login Works
-1. Test emergency creation
-2. Test emergency response flow
-3. Test group chat
-4. Test native maps navigation
-5. Convert to PWA (manifest.json, icons)
+## Key Files
+- `backend/src/routes/auth.ts` - Auth routes (verification disabled line ~133)
+- `backend/src/server.ts` - CORS config
+- `web-user/src/` - Frontend app
