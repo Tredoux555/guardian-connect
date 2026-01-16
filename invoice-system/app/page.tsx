@@ -45,8 +45,9 @@ const formatCurrency = (amount: number) => {
 };
 
 // Format invoice number
-const formatInvoiceNumber = (num: number) => {
-  return num.toString().padStart(3, '0');
+const formatInvoiceNumber = (num: number | string) => {
+  const n = typeof num === 'string' ? parseInt(num, 10) : num;
+  return n.toString().padStart(3, '0');
 };
 
 export default function InvoicePage() {
@@ -64,6 +65,8 @@ export default function InvoicePage() {
   const [showHistory, setShowHistory] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -104,11 +107,32 @@ export default function InvoicePage() {
     ));
   };
 
+  // Load invoice from history
+  const loadInvoice = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    setDate(invoice.date);
+    setCustomerName(invoice.customerName);
+    setCustomerAddress(invoice.customerAddress);
+    setLineItems(invoice.lineItems.map(item => ({ ...item, id: generateId() })));
+    setTaxRate(invoice.taxRate);
+    setNotes(invoice.notes);
+    setShowHistory(false);
+  };
+
+  // View invoice details
+  const viewInvoice = (invoice: Invoice) => {
+    setViewingInvoice(invoice);
+  };
+
   // Save invoice
-  const saveInvoice = () => {
+  const saveInvoice = (useSelectedNumber = false) => {
+    const invNum = useSelectedNumber && selectedInvoice 
+      ? selectedInvoice.invoiceNumber 
+      : formatInvoiceNumber(invoiceNumber);
+    
     const invoice: Invoice = {
       id: generateId(),
-      invoiceNumber: formatInvoiceNumber(invoiceNumber),
+      invoiceNumber: invNum,
       date,
       customerName,
       customerAddress,
@@ -121,14 +145,21 @@ export default function InvoicePage() {
       createdAt: new Date().toISOString(),
     };
 
-    const newInvoices = [invoice, ...savedInvoices];
+    // If we're editing an existing invoice, remove the old one first
+    let newInvoices;
+    if (selectedInvoice) {
+      newInvoices = savedInvoices.filter(inv => inv.id !== selectedInvoice.id);
+      newInvoices = [invoice, ...newInvoices];
+    } else {
+      newInvoices = [invoice, ...savedInvoices];
+      // Increment invoice number for next time only if it's a new invoice
+      const nextNumber = invoiceNumber + 1;
+      setInvoiceNumber(nextNumber);
+      localStorage.setItem('gs-invoice-number', nextNumber.toString());
+    }
+
     setSavedInvoices(newInvoices);
     localStorage.setItem('gs-invoices', JSON.stringify(newInvoices));
-    
-    // Increment invoice number for next time
-    const nextNumber = invoiceNumber + 1;
-    setInvoiceNumber(nextNumber);
-    localStorage.setItem('gs-invoice-number', nextNumber.toString());
     
     return invoice;
   };
@@ -139,10 +170,11 @@ export default function InvoicePage() {
     setCustomerAddress('');
     setLineItems([{ id: generateId(), description: '', amount: 0 }]);
     setNotes('');
+    setSelectedInvoice(null);
   };
 
   // Generate PDF
-  const generatePDF = async () => {
+  const generatePDF = async (fromHistory?: Invoice) => {
     setIsGenerating(true);
     setShowPreview(true);
     
@@ -180,36 +212,55 @@ export default function InvoicePage() {
       
       pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
       
-      // Save the invoice
-      const invoice = saveInvoice();
+      let invoice;
+      if (fromHistory) {
+        invoice = fromHistory;
+      } else {
+        // Save the invoice
+        invoice = saveInvoice(!!selectedInvoice);
+        clearForm();
+      }
       
       // Download
       pdf.save(`GS_Invoice_${invoice.invoiceNumber}.pdf`);
       
-      clearForm();
     } catch (error) {
       console.error('PDF generation error:', error);
       alert('Error generating PDF. Please try again.');
     } finally {
       setIsGenerating(false);
       setShowPreview(false);
+      setViewingInvoice(null);
     }
   };
 
   // Generate DOCX
-  const generateDOCX = async () => {
+  const generateDOCX = async (fromHistory?: Invoice) => {
     setIsGenerating(true);
+    
+    const inv = fromHistory || {
+      invoiceNumber: selectedInvoice ? selectedInvoice.invoiceNumber : formatInvoiceNumber(invoiceNumber),
+      date,
+      customerName,
+      customerAddress,
+      lineItems,
+      subtotal,
+      taxRate,
+      tax,
+      total,
+      notes,
+    };
     
     try {
       const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, 
-              AlignmentType, BorderStyle, WidthType, HeadingLevel } = await import('docx');
+              AlignmentType, BorderStyle, WidthType } = await import('docx');
       const { saveAs } = await import('file-saver');
       
       const borderStyle = { style: BorderStyle.SINGLE, size: 1, color: '999999' };
       const borders = { top: borderStyle, bottom: borderStyle, left: borderStyle, right: borderStyle };
       
       // Create line item rows
-      const itemRows = lineItems.filter(item => item.description).map(item => 
+      const itemRows = inv.lineItems.filter(item => item.description).map(item => 
         new TableRow({
           children: [
             new TableCell({
@@ -244,34 +295,33 @@ export default function InvoicePage() {
               alignment: AlignmentType.CENTER,
               children: [new TextRun({ text: 'International Trading', size: 24, color: '666666' })],
             }),
-            new Paragraph({ children: [] }), // Spacer
+            new Paragraph({ children: [] }),
             
             // Invoice title and number
             new Paragraph({
               children: [
-                new TextRun({ text: `Invoice ${formatInvoiceNumber(invoiceNumber)}`, bold: true, size: 32 }),
-                new TextRun({ text: `    Date: ${new Date(date).toLocaleDateString('en-GB')}`, size: 24 }),
+                new TextRun({ text: `Invoice ${inv.invoiceNumber}`, bold: true, size: 32 }),
+                new TextRun({ text: `    Date: ${new Date(inv.date).toLocaleDateString('en-GB')}`, size: 24 }),
               ],
             }),
-            new Paragraph({ children: [] }), // Spacer
+            new Paragraph({ children: [] }),
             
             // Customer
             new Paragraph({
               children: [new TextRun({ text: 'CUSTOMER', bold: true, size: 20, color: '00b4d8' })],
             }),
             new Paragraph({
-              children: [new TextRun({ text: customerName, bold: true, size: 24 })],
+              children: [new TextRun({ text: inv.customerName, bold: true, size: 24 })],
             }),
             new Paragraph({
-              children: [new TextRun({ text: customerAddress, size: 22 })],
+              children: [new TextRun({ text: inv.customerAddress, size: 22 })],
             }),
-            new Paragraph({ children: [] }), // Spacer
+            new Paragraph({ children: [] }),
             
             // Items table
             new Table({
               width: { size: 100, type: WidthType.PERCENTAGE },
               rows: [
-                // Header row
                 new TableRow({
                   children: [
                     new TableCell({
@@ -296,23 +346,23 @@ export default function InvoicePage() {
                 ...itemRows,
               ],
             }),
-            new Paragraph({ children: [] }), // Spacer
+            new Paragraph({ children: [] }),
             
             // Totals
             new Paragraph({
               alignment: AlignmentType.RIGHT,
-              children: [new TextRun({ text: `Subtotal: ${formatCurrency(subtotal)}`, size: 22 })],
+              children: [new TextRun({ text: `Subtotal: ${formatCurrency(inv.subtotal)}`, size: 22 })],
             }),
             new Paragraph({
               alignment: AlignmentType.RIGHT,
-              children: [new TextRun({ text: `VAT (${taxRate}%): ${formatCurrency(tax)}`, size: 22 })],
+              children: [new TextRun({ text: `VAT (${inv.taxRate}%): ${formatCurrency(inv.tax)}`, size: 22 })],
             }),
             new Paragraph({
               alignment: AlignmentType.RIGHT,
-              children: [new TextRun({ text: `TOTAL: ${formatCurrency(total)}`, bold: true, size: 28, color: '00b4d8' })],
+              children: [new TextRun({ text: `TOTAL: ${formatCurrency(inv.total)}`, bold: true, size: 28, color: '00b4d8' })],
             }),
-            new Paragraph({ children: [] }), // Spacer
-            new Paragraph({ children: [] }), // Spacer
+            new Paragraph({ children: [] }),
+            new Paragraph({ children: [] }),
             
             // Bank details
             new Paragraph({
@@ -327,7 +377,7 @@ export default function InvoicePage() {
             new Paragraph({
               children: [new TextRun({ text: `Account No: ${COMPANY.accountNumber}`, size: 22 })],
             }),
-            new Paragraph({ children: [] }), // Spacer
+            new Paragraph({ children: [] }),
             
             // Footer
             new Paragraph({
@@ -339,7 +389,7 @@ export default function InvoicePage() {
             new Paragraph({
               children: [new TextRun({ text: COMPANY.email, size: 20, color: '666666' })],
             }),
-            new Paragraph({ children: [] }), // Spacer
+            new Paragraph({ children: [] }),
             new Paragraph({
               alignment: AlignmentType.CENTER,
               children: [new TextRun({ text: 'THANK YOU FOR YOUR BUSINESS!', bold: true, size: 24, color: '00b4d8' })],
@@ -352,17 +402,20 @@ export default function InvoicePage() {
       const uint8Array = new Uint8Array(buffer);
       const blob = new Blob([uint8Array], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
       
-      // Save the invoice
-      const invoice = saveInvoice();
+      if (!fromHistory) {
+        // Save the invoice
+        saveInvoice(!!selectedInvoice);
+        clearForm();
+      }
       
-      saveAs(blob, `GS_Invoice_${invoice.invoiceNumber}.docx`);
+      saveAs(blob, `GS_Invoice_${inv.invoiceNumber}.docx`);
       
-      clearForm();
     } catch (error) {
       console.error('DOCX generation error:', error);
       alert('Error generating DOCX. Please try again.');
     } finally {
       setIsGenerating(false);
+      setViewingInvoice(null);
     }
   };
 
@@ -377,6 +430,32 @@ export default function InvoicePage() {
     a.click();
   };
 
+  // Import invoices from JSON backup
+  const importBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const imported = JSON.parse(event.target?.result as string);
+        if (Array.isArray(imported)) {
+          const merged = [...imported, ...savedInvoices];
+          // Remove duplicates by id
+          const unique = merged.filter((inv, index, self) => 
+            index === self.findIndex(t => t.id === inv.id)
+          );
+          setSavedInvoices(unique);
+          localStorage.setItem('gs-invoices', JSON.stringify(unique));
+          alert(`Imported ${imported.length} invoices!`);
+        }
+      } catch {
+        alert('Invalid backup file');
+      }
+    };
+    reader.readAsText(file);
+  };
+
   // Delete invoice from history
   const deleteInvoice = (id: string) => {
     if (confirm('Delete this invoice from history?')) {
@@ -386,14 +465,42 @@ export default function InvoicePage() {
     }
   };
 
+  // Get display invoice number
+  const displayInvoiceNumber = selectedInvoice 
+    ? selectedInvoice.invoiceNumber 
+    : formatInvoiceNumber(invoiceNumber);
+
+  // Get viewing invoice data or current form data
+  const previewData = viewingInvoice || {
+    invoiceNumber: displayInvoiceNumber,
+    date,
+    customerName,
+    customerAddress,
+    lineItems,
+    subtotal,
+    taxRate,
+    tax,
+    total,
+    notes,
+  };
+
   return (
     <div className="min-h-screen p-4 md:p-8">
       {/* Header */}
       <header className="max-w-6xl mx-auto mb-8">
         <div className="flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 bg-gradient-to-br from-gs-blue to-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-gs-blue/20">
-              <span className="text-3xl font-bold text-white">GS</span>
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg shadow-gs-blue/20 overflow-hidden">
+              {/* Logo - replace with actual logo */}
+              <img 
+                src="/gs-logo.jpg" 
+                alt="GS" 
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.parentElement!.innerHTML = '<span class="text-3xl font-bold text-white bg-gradient-to-br from-gs-blue to-blue-600 w-full h-full flex items-center justify-center">GS</span>';
+                }}
+              />
             </div>
             <div>
               <h1 className="text-2xl md:text-3xl font-bold text-white">Invoice Generator</h1>
@@ -411,18 +518,6 @@ export default function InvoicePage() {
               </svg>
               History ({savedInvoices.length})
             </button>
-            
-            {savedInvoices.length > 0 && (
-              <button
-                onClick={exportBackup}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl transition-colors"
-                title="Export backup"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-              </button>
-            )}
           </div>
         </div>
       </header>
@@ -431,31 +526,83 @@ export default function InvoicePage() {
         {/* History Panel */}
         {showHistory && (
           <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-2xl p-6 mb-8">
-            <h2 className="text-xl font-bold text-white mb-4">Invoice History</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-white">Invoice History</h2>
+              <div className="flex gap-2">
+                <label className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors cursor-pointer text-sm flex items-center gap-1">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                  Import
+                  <input type="file" accept=".json" onChange={importBackup} className="hidden" />
+                </label>
+                {savedInvoices.length > 0 && (
+                  <button
+                    onClick={exportBackup}
+                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors text-sm flex items-center gap-1"
+                    title="Export backup"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Export
+                  </button>
+                )}
+              </div>
+            </div>
             
             {savedInvoices.length === 0 ? (
               <p className="text-slate-400">No invoices yet. Create your first invoice below!</p>
             ) : (
               <div className="space-y-3 max-h-96 overflow-y-auto">
                 {savedInvoices.map(inv => (
-                  <div key={inv.id} className="bg-slate-900/50 rounded-xl p-4 flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-gs-blue font-mono font-bold">#{inv.invoiceNumber}</span>
-                        <span className="text-white font-medium">{inv.customerName}</span>
+                  <div key={inv.id} className="bg-slate-900/50 rounded-xl p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3">
+                          <span className="text-gs-blue font-mono font-bold">#{inv.invoiceNumber}</span>
+                          <span className="text-white font-medium">{inv.customerName}</span>
+                        </div>
+                        <div className="text-sm text-slate-400 mt-1">
+                          {new Date(inv.date).toLocaleDateString('en-GB')} • {formatCurrency(inv.total)}
+                        </div>
+                        {inv.lineItems.filter(i => i.description).length > 0 && (
+                          <div className="text-xs text-slate-500 mt-2">
+                            {inv.lineItems.filter(i => i.description).map(i => i.description).join(', ')}
+                          </div>
+                        )}
                       </div>
-                      <div className="text-sm text-slate-400 mt-1">
-                        {new Date(inv.date).toLocaleDateString('en-GB')} • {formatCurrency(inv.total)}
+                      <div className="flex items-center gap-2 ml-4">
+                        <button
+                          onClick={() => viewInvoice(inv)}
+                          className="p-2 text-slate-400 hover:text-gs-blue transition-colors"
+                          title="View / Regenerate"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => loadInvoice(inv)}
+                          className="p-2 text-slate-400 hover:text-green-400 transition-colors"
+                          title="Edit Invoice"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => deleteInvoice(inv.id)}
+                          className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+                          title="Delete"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
-                    <button
-                      onClick={() => deleteInvoice(inv.id)}
-                      className="p-2 text-slate-500 hover:text-red-400 transition-colors"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
                   </div>
                 ))}
               </div>
@@ -463,16 +610,98 @@ export default function InvoicePage() {
           </div>
         )}
 
+        {/* Invoice Detail Modal */}
+        {viewingInvoice && !showPreview && (
+          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-slate-700 flex items-center justify-between">
+                <h2 className="text-xl font-bold text-white">Invoice #{viewingInvoice.invoiceNumber}</h2>
+                <button onClick={() => setViewingInvoice(null)} className="text-slate-400 hover:text-white">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              <div className="p-6">
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <div className="text-xs text-slate-500 uppercase">Customer</div>
+                    <div className="text-white font-medium">{viewingInvoice.customerName}</div>
+                    <div className="text-slate-400 text-sm whitespace-pre-line">{viewingInvoice.customerAddress}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-slate-500 uppercase">Date</div>
+                    <div className="text-white">{new Date(viewingInvoice.date).toLocaleDateString('en-GB')}</div>
+                  </div>
+                </div>
+                
+                <div className="bg-slate-800 rounded-xl p-4 mb-6">
+                  <div className="text-xs text-slate-500 uppercase mb-3">Items</div>
+                  {viewingInvoice.lineItems.filter(i => i.description).map(item => (
+                    <div key={item.id} className="flex justify-between py-2 border-b border-slate-700 last:border-0">
+                      <span className="text-white">{item.description}</span>
+                      <span className="text-slate-300">{formatCurrency(item.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+                
+                <div className="flex justify-end mb-6">
+                  <div className="w-48">
+                    <div className="flex justify-between py-1 text-sm">
+                      <span className="text-slate-500">Subtotal</span>
+                      <span className="text-slate-300">{formatCurrency(viewingInvoice.subtotal)}</span>
+                    </div>
+                    <div className="flex justify-between py-1 text-sm">
+                      <span className="text-slate-500">VAT ({viewingInvoice.taxRate}%)</span>
+                      <span className="text-slate-300">{formatCurrency(viewingInvoice.tax)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 text-lg font-bold border-t border-slate-700 mt-2">
+                      <span className="text-white">Total</span>
+                      <span className="text-gs-blue">{formatCurrency(viewingInvoice.total)}</span>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => generatePDF(viewingInvoice)}
+                    disabled={isGenerating}
+                    className="flex-1 py-3 bg-gradient-to-r from-gs-blue to-blue-600 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
+                  >
+                    {isGenerating ? 'Generating...' : 'Download PDF'}
+                  </button>
+                  <button
+                    onClick={() => generateDOCX(viewingInvoice)}
+                    disabled={isGenerating}
+                    className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-semibold transition-colors disabled:opacity-50"
+                  >
+                    Download DOCX
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Invoice Form */}
         <div className="grid lg:grid-cols-2 gap-8">
           {/* Left: Form */}
           <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-2xl p-6">
+            {/* Selected Invoice Banner */}
+            {selectedInvoice && (
+              <div className="bg-gs-blue/20 border border-gs-blue/50 rounded-xl p-3 mb-4 flex items-center justify-between">
+                <span className="text-gs-blue text-sm">Editing Invoice #{selectedInvoice.invoiceNumber}</span>
+                <button onClick={clearForm} className="text-gs-blue hover:text-white text-sm">Cancel</button>
+              </div>
+            )}
+            
             {/* Invoice Number & Date */}
             <div className="flex items-center justify-between mb-6">
               <div>
                 <label className="block text-sm text-gs-silver mb-1">Invoice Number</label>
                 <div className="text-3xl font-bold text-gs-blue font-mono">
-                  #{formatInvoiceNumber(invoiceNumber)}
+                  #{displayInvoiceNumber}
                 </div>
               </div>
               <div>
@@ -523,7 +752,7 @@ export default function InvoicePage() {
               </div>
               
               <div className="space-y-3">
-                {lineItems.map((item, index) => (
+                {lineItems.map((item) => (
                   <div key={item.id} className="flex gap-3">
                     <input
                       type="text"
@@ -599,7 +828,7 @@ export default function InvoicePage() {
             {/* Action Buttons */}
             <div className="flex gap-3">
               <button
-                onClick={generatePDF}
+                onClick={() => generatePDF()}
                 disabled={!customerName || lineItems.every(i => !i.description) || isGenerating}
                 className="flex-1 py-3 bg-gradient-to-r from-gs-blue to-blue-600 text-white rounded-xl font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed btn-glow flex items-center justify-center gap-2"
               >
@@ -616,20 +845,20 @@ export default function InvoicePage() {
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                     </svg>
-                    Download PDF
+                    {selectedInvoice ? 'Update & Download PDF' : 'Download PDF'}
                   </>
                 )}
               </button>
               
               <button
-                onClick={generateDOCX}
+                onClick={() => generateDOCX()}
                 disabled={!customerName || lineItems.every(i => !i.description) || isGenerating}
                 className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                Download DOCX
+                DOCX
               </button>
             </div>
           </div>
@@ -647,8 +876,16 @@ export default function InvoicePage() {
             <div className="border border-gray-200 rounded-lg overflow-hidden">
               <div className="bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 p-6">
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-gradient-to-br from-cyan-400 to-blue-500 rounded-xl flex items-center justify-center">
-                    <span className="text-2xl font-bold text-white">GS</span>
+                  <div className="w-16 h-16 rounded-xl flex items-center justify-center overflow-hidden">
+                    <img 
+                      src="/gs-logo.jpg" 
+                      alt="GS" 
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        e.currentTarget.parentElement!.innerHTML = '<span class="text-2xl font-bold text-white bg-gradient-to-br from-cyan-400 to-blue-500 w-full h-full flex items-center justify-center rounded-xl" style="width:64px;height:64px">GS</span>';
+                      }}
+                    />
                   </div>
                   <div>
                     <h2 className="text-xl font-bold text-white">{COMPANY.name}</h2>
@@ -660,7 +897,7 @@ export default function InvoicePage() {
               <div className="p-6">
                 <div className="flex justify-between items-start mb-6">
                   <div>
-                    <div className="text-2xl font-bold text-gray-900">Invoice #{formatInvoiceNumber(invoiceNumber)}</div>
+                    <div className="text-2xl font-bold text-gray-900">Invoice #{displayInvoiceNumber}</div>
                     <div className="text-gray-500 text-sm mt-1">Date: {new Date(date).toLocaleDateString('en-GB')}</div>
                   </div>
                 </div>
@@ -731,8 +968,16 @@ export default function InvoicePage() {
             {/* PDF Header */}
             <div className="bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 -mx-8 -mt-8 px-8 py-6 mb-8">
               <div className="flex items-center gap-4">
-                <div className="w-20 h-20 bg-gradient-to-br from-cyan-400 to-blue-500 rounded-xl flex items-center justify-center">
-                  <span className="text-3xl font-bold text-white">GS</span>
+                <div className="w-20 h-20 rounded-xl flex items-center justify-center overflow-hidden">
+                  <img 
+                    src="/gs-logo.jpg" 
+                    alt="GS" 
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      e.currentTarget.parentElement!.innerHTML = '<span class="text-3xl font-bold text-white bg-gradient-to-br from-cyan-400 to-blue-500 w-full h-full flex items-center justify-center rounded-xl" style="width:80px;height:80px">GS</span>';
+                    }}
+                  />
                 </div>
                 <div>
                   <h1 className="text-2xl font-bold text-white">{COMPANY.name}</h1>
@@ -744,16 +989,16 @@ export default function InvoicePage() {
             {/* Invoice Details */}
             <div className="flex justify-between mb-8">
               <div>
-                <h2 className="text-3xl font-bold text-gray-900">Invoice #{formatInvoiceNumber(invoiceNumber)}</h2>
-                <p className="text-gray-500 mt-1">Date: {new Date(date).toLocaleDateString('en-GB')}</p>
+                <h2 className="text-3xl font-bold text-gray-900">Invoice #{previewData.invoiceNumber}</h2>
+                <p className="text-gray-500 mt-1">Date: {new Date(previewData.date).toLocaleDateString('en-GB')}</p>
               </div>
             </div>
 
             {/* Customer */}
             <div className="mb-8">
               <div className="text-xs text-cyan-600 font-semibold uppercase tracking-wider mb-2">Customer</div>
-              <div className="text-xl font-semibold text-gray-900">{customerName}</div>
-              <div className="text-gray-600 whitespace-pre-line">{customerAddress}</div>
+              <div className="text-xl font-semibold text-gray-900">{previewData.customerName}</div>
+              <div className="text-gray-600 whitespace-pre-line">{previewData.customerAddress}</div>
             </div>
 
             {/* Items Table */}
@@ -765,7 +1010,7 @@ export default function InvoicePage() {
                 </tr>
               </thead>
               <tbody>
-                {lineItems.filter(i => i.description).map((item, idx) => (
+                {previewData.lineItems.filter(i => i.description).map((item, idx) => (
                   <tr key={item.id} className={idx % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
                     <td className="py-3 px-4 text-gray-800">{item.description}</td>
                     <td className="py-3 px-4 text-right text-gray-800">{formatCurrency(item.amount)}</td>
@@ -779,15 +1024,15 @@ export default function InvoicePage() {
               <div className="w-64">
                 <div className="flex justify-between py-2 border-b border-gray-200">
                   <span className="text-gray-600">Subtotal</span>
-                  <span className="text-gray-900">{formatCurrency(subtotal)}</span>
+                  <span className="text-gray-900">{formatCurrency(previewData.subtotal)}</span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-gray-200">
-                  <span className="text-gray-600">VAT ({taxRate}%)</span>
-                  <span className="text-gray-900">{formatCurrency(tax)}</span>
+                  <span className="text-gray-600">VAT ({previewData.taxRate}%)</span>
+                  <span className="text-gray-900">{formatCurrency(previewData.tax)}</span>
                 </div>
                 <div className="flex justify-between py-3 text-xl font-bold">
                   <span className="text-gray-900">TOTAL</span>
-                  <span className="text-cyan-600">{formatCurrency(total)}</span>
+                  <span className="text-cyan-600">{formatCurrency(previewData.total)}</span>
                 </div>
               </div>
             </div>
