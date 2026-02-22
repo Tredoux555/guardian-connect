@@ -73,22 +73,26 @@ router.post(
 
       // Send notifications to all registered contacts
       console.log(`📤 Starting notification process for ${participants.length} participant(s)...`);
-      
+
+      // Batch query: get all FCM tokens in one query instead of N+1
+      const participantIds = participants.filter((p: any) => p?.userId).map((p: any) => p.userId);
+      const fcmTokenResult = participantIds.length > 0
+        ? await query(
+            'SELECT id, fcm_token FROM users WHERE id = ANY($1)',
+            [participantIds]
+          )
+        : { rows: [] };
+      const fcmTokenMap = new Map<string, string | null>();
+      fcmTokenResult.rows.forEach((r: any) => fcmTokenMap.set(r.id, r.fcm_token));
+
       for (const participant of participants) {
         if (participant && participant.userId) {
-          console.log(`\n📤 === NOTIFICATION ATTEMPT FOR: ${participant.userId} (${participant.name}) ===`);
-          
-          // Check if user has FCM token before attempting push
-          const tokenCheck = await query(
-            'SELECT fcm_token FROM users WHERE id = $1',
-            [participant.userId]
-          );
-          const hasFcmToken = tokenCheck.rows.length > 0 && 
-                             tokenCheck.rows[0].fcm_token != null &&
-                             tokenCheck.rows[0].fcm_token.toString().trim().isNotEmpty;
-          
-          console.log(`   🔑 FCM Token Status: ${hasFcmToken ? '✅ EXISTS' : '❌ MISSING'}`);
-          
+          console.log(`📤 Notifying: ${participant.userId} (${participant.name})`);
+
+          // Use pre-fetched FCM token (no extra query)
+          const fcmToken = fcmTokenMap.get(participant.userId);
+          const hasFcmToken = fcmToken != null && fcmToken.toString().trim().length > 0;
+
           // Send Firebase push notification (for mobile apps)
           if (hasFcmToken) {
             try {
@@ -98,18 +102,12 @@ router.post(
                 senderDisplayName,
                 undefined // Location will be sent when user accepts
               );
-              console.log(`   ✅ Firebase push sent successfully to ${participant.userId}`);
+              console.log(`   ✅ Firebase push sent to ${participant.userId}`);
             } catch (error: any) {
-              console.error(`   ❌ FAILED to send Firebase alert to ${participant.userId}:`, error);
-              console.error(`      Error type: ${error?.constructor?.name || 'Unknown'}`);
-              console.error(`      Error message: ${error?.message || error?.toString() || 'No message'}`);
-              if (error?.stack) {
-                console.error(`      Stack: ${error.stack}`);
-              }
+              console.error(`   ❌ Firebase alert failed for ${participant.userId}: ${error?.message || error}`);
             }
           } else {
-            console.log(`   ⚠️ SKIPPING Firebase push - no FCM token for user ${participant.userId}`);
-            console.log(`      User needs to log in to register FCM token`);
+            console.log(`   ⚠️ No FCM token for ${participant.userId} - skipping Firebase push`);
           }
 
           // Send Web Push notification (for web browsers - works even when app is closed)

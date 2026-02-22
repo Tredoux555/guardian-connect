@@ -486,13 +486,28 @@ export const EmergencyChat = ({ emergencyId }: EmergencyChatProps) => {
         videoStreamRef.current = null
       }
 
+      const MAX_VIDEO_SECONDS = 30
+
       videoRecorder.start()
       setIsRecordingVideo(true)
       setRecordingTime(0)
 
-      // Start video timer
+      // Start video timer with auto-stop at MAX_VIDEO_SECONDS
       videoTimerRef.current = setInterval(() => {
-        setRecordingTime((prev) => prev + 1)
+        setRecordingTime((prev) => {
+          if (prev + 1 >= MAX_VIDEO_SECONDS) {
+            // Auto-stop recording at limit
+            if (videoRecorderRef.current && videoRecorderRef.current.state === 'recording') {
+              videoRecorderRef.current.stop()
+              setIsRecordingVideo(false)
+              if (videoTimerRef.current) {
+                clearInterval(videoTimerRef.current)
+                videoTimerRef.current = null
+              }
+            }
+          }
+          return prev + 1
+        })
       }, 1000)
     } catch (err: any) {
       console.error('Failed to start video recording:', err)

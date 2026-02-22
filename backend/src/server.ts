@@ -33,19 +33,21 @@ app.use(helmet({
 // CORS preflight handler - must be before CORS middleware
 app.options('*', cors());
 
-// CORS configuration - allow specific origins for Railway deployment
-app.use(cors({
-  origin: [
+// CORS configuration - use ALLOWED_ORIGINS env var or fall back to known Railway URLs
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((o: string) => o.trim())
+  : [
     'https://web-user-production.up.railway.app',
     'https://back-end-production-4a69.up.railway.app',
-    'https://guardian-connect-production.up.railway.app',
-    'https://guardian-connect.up.railway.app',
-    /\.railway\.app$/,
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:5173'
-  ],
+  ];
+
+// Add localhost origins in development only
+if (process.env.NODE_ENV !== 'production') {
+  allowedOrigins.push('http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173');
+}
+
+app.use(cors({
+  origin: allowedOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']

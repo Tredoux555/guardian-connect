@@ -16,7 +16,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "aws-sdk": "^2.1509.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
@@ -29,10 +28,8 @@
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^7.0.10",
     "pg": "^8.11.3",
-    "redis": "^4.6.11",
     "socket.io": "^4.6.1",
     "stripe": "^14.7.0",
-    "twilio": "^4.19.0",
     "typescript": "^5.3.3",
     "uuid": "^9.0.1",
     "web-push": "^3.6.7"

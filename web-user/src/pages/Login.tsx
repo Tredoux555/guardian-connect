@@ -5,8 +5,8 @@ import './Login.css'
 
 function Login() {
   const [isRegistering, setIsRegistering] = useState(false)
-  const [email, setEmail] = useState('user1@example.com')
-  const [password, setPassword] = useState('password123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -196,13 +196,7 @@ function Login() {
             {loading ? (isRegistering ? 'Registering...' : 'Logging in...') : (isRegistering ? 'Register' : 'Login')}
           </button>
         </form>
-        {!isRegistering && (
-          <div className="test-users">
-            <p><strong>Test Users:</strong></p>
-            <p>user1@example.com / password123</p>
-            <p>user2@example.com / password123</p>
-          </div>
-        )}
+        {/* Test credentials removed for production */}
       </div>
     </div>
   )

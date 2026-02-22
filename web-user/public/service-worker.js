@@ -1,23 +1,87 @@
 // Service Worker for Emergency Push Notifications
-// Handles background notifications, sounds, and location access
+// Handles background notifications, sounds, location access, and offline caching
 
+const CACHE_NAME = 'guardian-connect-v1';
 const EMERGENCY_SOUND_URL = '/emergency-alert.mp3';
+
+// Critical assets to cache for offline use
+const PRECACHE_URLS = [
+  '/',
+  '/index.html',
+  '/manifest.json',
+  '/emergency-alert.mp3',
+];
+
 // Store sound references globally in service worker for continuous playback
 let emergencySoundContext = null;
 let emergencySoundOscillator = null;
 let emergencySoundGain = null;
 let emergencySoundSource = null;
 
-// Install service worker
+// Install service worker - precache critical assets
 self.addEventListener('install', (event) => {
   console.log('🔔 Service Worker installing...');
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      console.log('📦 Pre-caching critical assets');
+      return cache.addAll(PRECACHE_URLS).catch((err) => {
+        console.warn('⚠️ Pre-cache partial failure (non-critical):', err);
+      });
+    })
+  );
   self.skipWaiting(); // Activate immediately
 });
 
-// Activate service worker
+// Activate service worker - clean old caches
 self.addEventListener('activate', (event) => {
   console.log('🔔 Service Worker activating...');
-  event.waitUntil(self.clients.claim()); // Take control of all pages immediately
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames
+          .filter((name) => name !== CACHE_NAME)
+          .map((name) => caches.delete(name))
+      );
+    }).then(() => self.clients.claim())
+  );
+});
+
+// Fetch handler - network first, fall back to cache
+self.addEventListener('fetch', (event) => {
+  // Skip non-GET requests and API calls
+  if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/')) return;
+
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        // Cache successful responses for static assets
+        if (response.status === 200 && (
+          url.pathname.endsWith('.js') ||
+          url.pathname.endsWith('.css') ||
+          url.pathname.endsWith('.html') ||
+          url.pathname === '/'
+        )) {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
+        return response;
+      })
+      .catch(() => {
+        // Network failed - try cache
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) return cachedResponse;
+          // For navigation requests, serve the cached index.html (SPA routing)
+          if (event.request.mode === 'navigate') {
+            return caches.match('/index.html');
+          }
+          return new Response('Offline', { status: 503, statusText: 'Offline' });
+        });
+      })
+  );
 });
 
 // Handle push notifications (from Web Push API)

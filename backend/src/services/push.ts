@@ -108,7 +108,7 @@ export const sendEmergencyAlert = async (
     console.log(`   User found: ${user.email || 'Unknown'}`);
     console.log(`   FCM Token: ${fcmToken ? `${fcmToken.substring(0, 20)}... (${fcmToken.length} chars)` : 'NULL'}`);
 
-    if (!fcmToken || fcmToken.toString().trim().isEmpty) {
+    if (!fcmToken || fcmToken.toString().trim().length === 0) {
       console.error(`❌ No FCM token found for user ${userId} (${user.email || 'Unknown'})`);
       console.error(`   User needs to log in to register FCM token`);
       throw new Error(`No FCM token registered for user ${userId}`);

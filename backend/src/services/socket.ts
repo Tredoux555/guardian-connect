@@ -4,9 +4,18 @@ import { Server as HTTPServer } from 'http';
 export let io: SocketIOServer;
 
 export const initializeSocket = (httpServer: HTTPServer) => {
+  // Build allowed origins list (same as HTTP CORS)
+  const socketOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((o: string) => o.trim())
+    : ['https://web-user-production.up.railway.app', 'https://back-end-production-4a69.up.railway.app'];
+
+  if (process.env.NODE_ENV !== 'production') {
+    socketOrigins.push('http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173');
+  }
+
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: '*', // Allow all origins for mobile apps
+      origin: socketOrigins,
       methods: ['GET', 'POST'],
       credentials: true,
       allowedHeaders: ['Content-Type', 'Authorization'],

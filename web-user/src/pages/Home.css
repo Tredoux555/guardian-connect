@@ -1,171 +1,219 @@
+/* Home — iOS Emergency Dashboard */
+
 .home-container {
-  min-height: 100vh;
-  background: var(--gradient-sky);
+  min-height: 100dvh;
+  background: var(--bg-primary);
 }
 
+/* ─── Navigation Bar (iOS style) ─── */
 .home-header {
-  background: var(--color-trust-blue);
-  color: var(--color-text-white);
-  padding: var(--spacing-lg) var(--spacing-xl);
+  background: var(--bg-blur);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 0.5px solid var(--separator);
+  padding: var(--safe-top) var(--space-16) 0;
+  position: sticky;
+  top: 0;
+  z-index: var(--z-nav);
+}
+
+.home-header-inner {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  box-shadow: var(--shadow-sm);
+  height: 44px;
 }
 
 .home-header h1 {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
   margin: 0;
-  font-weight: 600;
+  letter-spacing: var(--tracking-normal);
 }
 
 .header-actions {
   display: flex;
-  gap: var(--spacing-md);
+  gap: var(--space-12);
 }
 
 .header-actions button {
-  padding: var(--spacing-sm) var(--spacing-lg);
-  background: var(--color-bg-card);
-  color: var(--color-trust-blue);
+  padding: 0;
+  background: none;
+  color: var(--ios-blue);
   border: none;
-  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
   cursor: pointer;
-  font-weight: 500;
-  transition: all var(--transition-base);
-  box-shadow: var(--shadow-sm);
+  transition: opacity var(--duration-fast) var(--ease-ios);
 }
 
-.header-actions button:hover {
-  transform: scale(1.02);
-  box-shadow: var(--shadow-md);
+.header-actions button:active {
+  opacity: 0.5;
 }
 
+/* ─── Main Content ─── */
 .home-main {
-  padding: var(--spacing-3xl) var(--spacing-xl);
-  max-width: 600px;
+  padding: var(--space-24) var(--space-16);
+  max-width: 500px;
   margin: 0 auto;
 }
 
+/* ─── Emergency Section (grouped card) ─── */
 .emergency-section {
-  background: var(--color-bg-card);
-  padding: var(--spacing-3xl);
+  background: var(--bg-secondary);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  padding: var(--space-32);
+  box-shadow: var(--shadow-card);
   text-align: center;
 }
 
 .emergency-section h2 {
-  color: var(--color-emergency-red);
-  margin-bottom: var(--spacing-sm);
-  font-weight: 600;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--gc-red);
+  margin: 0 0 var(--space-4) 0;
+  letter-spacing: var(--tracking-tight);
 }
 
 .subtitle {
-  color: var(--color-text-secondary);
-  margin-bottom: var(--spacing-xl);
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin: 0 0 var(--space-24) 0;
 }
 
+/* ─── Emergency Trigger Button (big red) ─── */
 .emergency-button {
-  width: 250px;
-  height: 250px;
+  width: 200px;
+  height: 200px;
   border-radius: var(--radius-full);
-  background: var(--color-emergency-red);
-  color: var(--color-text-white);
+  background: var(--gc-red);
+  color: var(--text-on-color);
   border: none;
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
   cursor: pointer;
-  box-shadow: var(--shadow-button);
-  transition: all var(--transition-base);
+  box-shadow: var(--shadow-button), 0 0 0 8px var(--gc-red-bg);
+  transition: all var(--duration-base) var(--ease-spring);
+  position: relative;
+}
+
+.emergency-button::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--gc-red-bg-strong);
+  animation: ringPulse 2s var(--ease-ios) infinite;
+}
+
+@keyframes ringPulse {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.06); opacity: 0; }
 }
 
 .emergency-button:hover {
-  background: var(--color-emergency-red-hover);
-  transform: scale(1.02);
-  box-shadow: 0 6px 16px rgba(255, 107, 107, 0.3);
+  transform: scale(1.03);
+  box-shadow: var(--shadow-button), 0 0 0 12px var(--gc-red-bg);
 }
 
 .emergency-button:active {
-  background: var(--color-emergency-red-dark);
-  transform: scale(0.98);
+  transform: scale(0.96);
+  filter: brightness(0.9);
 }
 
 .emergency-button:disabled {
-  opacity: 0.6;
+  opacity: 0.4;
   cursor: not-allowed;
   transform: none;
 }
 
+.emergency-button:disabled::before {
+  display: none;
+}
+
+/* ─── Active Emergency Banner ─── */
 .active-emergency {
-  padding: var(--spacing-xl);
-  background: #FFF8E1;
-  border: 2px solid var(--color-warning-amber);
+  padding: var(--space-16);
+  background: var(--gc-red-bg);
+  border: 1px solid var(--gc-red-light);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  margin-top: var(--space-16);
+}
+
+.active-emergency p {
+  margin: 0;
+  color: var(--gc-red);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
 }
 
 .active-emergency button {
-  margin-top: var(--spacing-md);
-  padding: var(--spacing-sm) var(--spacing-xl);
-  background: var(--color-emergency-red);
-  color: var(--color-text-white);
+  margin-top: var(--space-12);
+  padding: var(--space-8) var(--space-20);
+  background: var(--gc-red);
+  color: var(--text-on-color);
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
-  font-weight: 500;
-  transition: all var(--transition-base);
+  transition: all var(--duration-fast) var(--ease-ios);
 }
 
-.active-emergency button:hover {
-  background: var(--color-emergency-red-hover);
-  transform: scale(1.02);
+.active-emergency button:active {
+  transform: scale(0.97);
 }
 
+/* ─── Pending Emergencies ─── */
 .pending-emergencies {
-  margin-bottom: var(--spacing-xl);
-  background: #FFF8E1;
-  padding: var(--spacing-lg);
+  margin-bottom: var(--space-20);
+  background: rgba(255, 149, 0, 0.08);
+  padding: var(--space-16);
   border-radius: var(--radius-md);
-  border: 2px solid var(--color-warning-amber);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid rgba(255, 149, 0, 0.2);
 }
 
 .pending-emergencies h2 {
-  color: #856404;
-  margin-bottom: var(--spacing-md);
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--ios-orange);
+  margin: 0 0 var(--space-12) 0;
 }
 
 .pending-emergency-card {
-  background: var(--color-bg-card);
-  padding: var(--spacing-md);
-  margin-bottom: var(--spacing-md);
-  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  padding: var(--space-12) var(--space-16);
+  margin-bottom: var(--space-8);
+  border-radius: var(--radius-sm);
   display: flex;
   justify-content: space-between;
   align-items: center;
   box-shadow: var(--shadow-sm);
-  transition: all var(--transition-base);
 }
 
-.pending-emergency-card:hover {
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+.pending-emergency-card:last-child {
+  margin-bottom: 0;
+}
+
+.pending-emergency-card p {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
 }
 
 .pending-emergency-card button {
-  padding: var(--spacing-sm) var(--spacing-lg);
-  background: var(--color-emergency-red);
-  color: var(--color-text-white);
+  padding: var(--space-8) var(--space-16);
+  background: var(--gc-red);
+  color: var(--text-on-color);
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
-  font-weight: 500;
-  transition: all var(--transition-base);
+  transition: all var(--duration-fast) var(--ease-ios);
 }
 
-.pending-emergency-card button:hover {
-  background: var(--color-emergency-red-hover);
-  transform: scale(1.02);
+.pending-emergency-card button:active {
+  transform: scale(0.97);
 }
-
