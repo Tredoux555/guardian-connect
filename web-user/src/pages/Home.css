@@ -1,0 +1,219 @@
+/* Home — iOS Emergency Dashboard */
+
+.home-container {
+  min-height: 100dvh;
+  background: var(--bg-primary);
+}
+
+/* ─── Navigation Bar (iOS style) ─── */
+.home-header {
+  background: var(--bg-blur);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 0.5px solid var(--separator);
+  padding: var(--safe-top) var(--space-16) 0;
+  position: sticky;
+  top: 0;
+  z-index: var(--z-nav);
+}
+
+.home-header-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 44px;
+}
+
+.home-header h1 {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: var(--tracking-normal);
+}
+
+.header-actions {
+  display: flex;
+  gap: var(--space-12);
+}
+
+.header-actions button {
+  padding: 0;
+  background: none;
+  color: var(--ios-blue);
+  border: none;
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
+  cursor: pointer;
+  transition: opacity var(--duration-fast) var(--ease-ios);
+}
+
+.header-actions button:active {
+  opacity: 0.5;
+}
+
+/* ─── Main Content ─── */
+.home-main {
+  padding: var(--space-24) var(--space-16);
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+/* ─── Emergency Section (grouped card) ─── */
+.emergency-section {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-32);
+  box-shadow: var(--shadow-card);
+  text-align: center;
+}
+
+.emergency-section h2 {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--gc-red);
+  margin: 0 0 var(--space-4) 0;
+  letter-spacing: var(--tracking-tight);
+}
+
+.subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin: 0 0 var(--space-24) 0;
+}
+
+/* ─── Emergency Trigger Button (big red) ─── */
+.emergency-button {
+  width: 200px;
+  height: 200px;
+  border-radius: var(--radius-full);
+  background: var(--gc-red);
+  color: var(--text-on-color);
+  border: none;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+  box-shadow: var(--shadow-button), 0 0 0 8px var(--gc-red-bg);
+  transition: all var(--duration-base) var(--ease-spring);
+  position: relative;
+}
+
+.emergency-button::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: var(--radius-full);
+  border: 2px solid var(--gc-red-bg-strong);
+  animation: ringPulse 2s var(--ease-ios) infinite;
+}
+
+@keyframes ringPulse {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.06); opacity: 0; }
+}
+
+.emergency-button:hover {
+  transform: scale(1.03);
+  box-shadow: var(--shadow-button), 0 0 0 12px var(--gc-red-bg);
+}
+
+.emergency-button:active {
+  transform: scale(0.96);
+  filter: brightness(0.9);
+}
+
+.emergency-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.emergency-button:disabled::before {
+  display: none;
+}
+
+/* ─── Active Emergency Banner ─── */
+.active-emergency {
+  padding: var(--space-16);
+  background: var(--gc-red-bg);
+  border: 1px solid var(--gc-red-light);
+  border-radius: var(--radius-md);
+  margin-top: var(--space-16);
+}
+
+.active-emergency p {
+  margin: 0;
+  color: var(--gc-red);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.active-emergency button {
+  margin-top: var(--space-12);
+  padding: var(--space-8) var(--space-20);
+  background: var(--gc-red);
+  color: var(--text-on-color);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-ios);
+}
+
+.active-emergency button:active {
+  transform: scale(0.97);
+}
+
+/* ─── Pending Emergencies ─── */
+.pending-emergencies {
+  margin-bottom: var(--space-20);
+  background: rgba(255, 149, 0, 0.08);
+  padding: var(--space-16);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 149, 0, 0.2);
+}
+
+.pending-emergencies h2 {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--ios-orange);
+  margin: 0 0 var(--space-12) 0;
+}
+
+.pending-emergency-card {
+  background: var(--bg-secondary);
+  padding: var(--space-12) var(--space-16);
+  margin-bottom: var(--space-8);
+  border-radius: var(--radius-sm);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--shadow-sm);
+}
+
+.pending-emergency-card:last-child {
+  margin-bottom: 0;
+}
+
+.pending-emergency-card p {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.pending-emergency-card button {
+  padding: var(--space-8) var(--space-16);
+  background: var(--gc-red);
+  color: var(--text-on-color);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-ios);
+}
+
+.pending-emergency-card button:active {
+  transform: scale(0.97);
+}

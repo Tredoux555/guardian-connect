@@ -1,0 +1,9 @@
+/* App shell — iOS-style layout */
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  max-width: 100vw;
+  overflow-x: hidden;
+}

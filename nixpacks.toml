@@ -1,0 +1,15 @@
+# Nixpacks configuration for Railway
+# This helps Railway understand the monorepo structure
+
+[phases.setup]
+nixPkgs = ["nodejs-18_x"]
+
+[phases.install]
+cmds = ["echo 'This is a monorepo. Set Root Directory in Railway settings:'", "echo '- Backend: backend'", "echo '- Frontend: web-user'"]
+
+[phases.build]
+cmds = ["echo 'Please set Root Directory in Railway service settings'"]
+
+[start]
+cmd = "echo 'Please set Root Directory: backend or web-user'"
+

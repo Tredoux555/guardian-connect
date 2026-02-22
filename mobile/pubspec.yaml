@@ -1,0 +1,90 @@
+name: guardian_connect
+description: Guardian Connect - Emergency Alert App
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # State Management
+  provider: ^6.1.1
+  
+  # HTTP & API
+  http: ^1.1.0
+  dio: ^5.4.0
+  
+  # Storage
+  flutter_secure_storage: ^9.0.0
+  shared_preferences: ^2.2.2
+  sqflite: ^2.3.0  # Local database for offline support and emergency history
+  path: ^1.8.3
+  
+  # Maps & Location
+  google_maps_flutter: ^2.5.0
+  geolocator: ^10.1.0
+  geocoding: ^2.1.1
+  
+  # Real-time
+  socket_io_client: ^2.0.3+1
+  
+  # Push Notifications
+  firebase_core: ^4.2.1
+  firebase_messaging: ^16.0.4
+  flutter_local_notifications: ^18.0.1
+  
+  # Audio (for emergency alarm)
+  audioplayers: ^6.1.0
+  
+  # UI
+  cupertino_icons: ^1.0.6
+  flutter_svg: ^2.0.9
+  cached_network_image: ^3.3.1
+  
+  # Image Picker
+  image_picker: ^1.0.7
+  flutter_image_compress: ^2.3.0
+  
+  # Audio Recording
+  record: ^6.0.0
+  path_provider: ^2.1.1
+  
+  # Utils
+  uuid: ^4.2.1
+  intl: ^0.18.1
+  url_launcher: ^6.2.2
+  permission_handler: ^11.1.0
+  
+  # Background Tasks
+  workmanager: ^0.5.2  # Background tasks for battery-efficient polling
+  
+  # Video Calling (temporarily disabled due to CocoaPods download issues)
+  # agora_rtc_engine: ^6.3.0  # Video calling for emergencies - uncomment when needed
+  
+  # Home Screen Widget
+  home_widget: ^0.8.1  # iOS/Android home screen widgets
+  
+  # Navigation
+  go_router: ^13.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/sounds/
+
+
+
+
+
+

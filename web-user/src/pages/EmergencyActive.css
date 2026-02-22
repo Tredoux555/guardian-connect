@@ -1,0 +1,293 @@
+/* Emergency Active — iOS Emergency Interface */
+
+.emergency-active {
+  min-height: 100dvh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-family);
+}
+
+/* ─── Emergency Header (red accent bar) ─── */
+.emergency-header {
+  background: var(--gc-red);
+  padding: var(--safe-top) var(--space-16) 0;
+  text-align: center;
+}
+
+.emergency-header-inner {
+  padding: var(--space-12) 0;
+}
+
+.emergency-header h1 {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  color: var(--text-on-color);
+  letter-spacing: var(--tracking-tight);
+}
+
+.emergency-header p {
+  margin: var(--space-4) 0 0 0;
+  font-size: var(--text-sm);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* ─── Connection Status ─── */
+.connection-status {
+  background: var(--bg-secondary);
+  padding: var(--space-8) var(--space-16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  border-bottom: 0.5px solid var(--separator);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--ios-green);
+  box-shadow: 0 0 6px var(--ios-green);
+  animation: statusPulse 2s ease infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.status-text {
+  font-size: var(--text-xs);
+  color: var(--ios-green);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ─── Location Section ─── */
+.location-section {
+  padding: var(--space-16);
+  background: var(--bg-primary);
+}
+
+.section-title {
+  margin: 0 0 var(--space-12) 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ─── Buttons ─── */
+.btn-share-location {
+  width: 100%;
+  padding: var(--space-12);
+  margin-bottom: var(--space-12);
+  background: var(--ios-blue);
+  color: var(--text-on-color);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-ios);
+}
+
+.btn-share-location:active {
+  transform: scale(0.98);
+  filter: brightness(0.95);
+}
+
+.btn-share-location.shared {
+  background: var(--ios-green);
+}
+
+.btn-navigate-main {
+  width: 100%;
+  padding: var(--space-16);
+  margin-bottom: var(--space-12);
+  background: var(--gc-red);
+  color: var(--text-on-color);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: all var(--duration-fast) var(--ease-ios);
+  box-shadow: var(--shadow-button);
+}
+
+.btn-navigate-main:active {
+  transform: scale(0.98);
+  filter: brightness(0.9);
+}
+
+/* ─── Location Cards ─── */
+.location-card {
+  padding: var(--space-12) var(--space-16);
+  margin-bottom: var(--space-8);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  border: 0.5px solid var(--separator);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.location-card.sender {
+  border-color: var(--gc-red-light);
+  background: var(--gc-red-bg);
+}
+
+.location-card.you {
+  border-color: rgba(52, 199, 89, 0.3);
+  background: rgba(52, 199, 89, 0.06);
+}
+
+.location-info strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.location-badge {
+  font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-8);
+  border-radius: var(--radius-full);
+  margin-left: var(--space-8);
+  font-weight: var(--weight-medium);
+}
+
+.location-badge.needs-help {
+  background: var(--gc-red);
+  color: var(--text-on-color);
+}
+
+.location-badge.you-badge {
+  background: var(--ios-green);
+  color: var(--text-on-color);
+}
+
+.btn-navigate-small {
+  padding: var(--space-8) var(--space-12);
+  background: var(--ios-blue);
+  color: var(--text-on-color);
+  border: none;
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-ios);
+}
+
+.btn-navigate-small:active {
+  transform: scale(0.96);
+}
+
+/* ─── Chat Section ─── */
+.chat-section {
+  padding: var(--space-16);
+  background: var(--bg-primary);
+  flex: 1;
+}
+
+/* ─── Action Buttons (bottom bar) ─── */
+.action-buttons {
+  padding: var(--space-12) var(--space-16) calc(var(--space-12) + var(--safe-bottom));
+  background: var(--bg-blur);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  display: flex;
+  gap: var(--space-12);
+  border-top: 0.5px solid var(--separator);
+}
+
+.btn-safe {
+  flex: 1;
+  padding: var(--space-16);
+  background: var(--ios-green);
+  color: var(--text-on-color);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-ios);
+}
+
+.btn-safe:active {
+  transform: scale(0.98);
+  filter: brightness(0.95);
+}
+
+.btn-cancel {
+  flex: 1;
+  padding: var(--space-16);
+  background: var(--fill-secondary);
+  color: var(--text-secondary);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-ios);
+}
+
+.btn-cancel:active {
+  transform: scale(0.98);
+}
+
+.btn-back {
+  width: 100%;
+  padding: var(--space-12);
+  background: var(--fill-secondary);
+  color: var(--text-secondary);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-ios);
+}
+
+.btn-back:active {
+  transform: scale(0.98);
+}
+
+/* ─── Loading & Error States ─── */
+.loading-container,
+.error-container {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+}
+
+.no-locations {
+  text-align: center;
+  color: var(--text-tertiary);
+  padding: var(--space-20);
+  font-size: var(--text-sm);
+}
+
+/* ─── Powered By ─── */
+.powered-by {
+  text-align: center;
+  padding: var(--space-12);
+  color: var(--text-quaternary);
+  font-size: var(--text-xs);
+  border-top: 0.5px solid var(--separator);
+}
+
+.powered-by span {
+  color: var(--ios-blue);
+  font-weight: var(--weight-semibold);
+}

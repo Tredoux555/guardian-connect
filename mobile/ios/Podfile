@@ -1,0 +1,227 @@
+# Uncomment this line to define a global platform for your project
+platform :ios, '15.0'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks! :linkage => :static
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      # Set minimum iOS deployment target to 12.0 for all pods
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
+      config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
+        '$(inherited)',
+        'PERMISSION_LOCATION=1',
+      ]
+    end
+  end
+  
+  # Fix double-quoted includes in framework headers
+  # This fixes the root cause: changing "file.h" to <Framework/file.h>
+  puts "Fixing double-quoted includes in framework headers..."
+  
+  # Files that should NOT be modified (they're correct as-is)
+  skip_files = [
+    'SqfliteImportPublic.h',  # This file is correct and should not be modified
+  ]
+  
+  # Fix FirebaseCore headers
+  firebase_core_path = File.join(installer.sandbox.root, 'FirebaseCore')
+  if Dir.exist?(firebase_core_path)
+    Dir.glob(File.join(firebase_core_path, '**/*.h')).each do |header_file|
+      begin
+        # Skip if file should not be modified
+        next if skip_files.include?(File.basename(header_file))
+        # Skip if file doesn't exist
+        next unless File.exist?(header_file)
+        
+        # Make file writable if it's read-only
+        File.chmod(0644, header_file) unless File.writable?(header_file)
+        
+        content = File.read(header_file)
+        # Fix imports like #import "FIRApp.h" to #import <FirebaseCore/FIRApp.h>
+        # But preserve subdirectory paths like Extension/FIRComponentContainer.h
+        fixed_content = content.gsub(/#import\s+"([^"]+\.h)"/) do |match|
+          filename = $1
+          # Only fix if it's a FirebaseCore header (starts with FIR or Firebase)
+          # Don't fix if it already has a path (contains /)
+          if (filename.start_with?('FIR') || filename.start_with?('Firebase')) && !filename.include?('/')
+            "#import <FirebaseCore/#{filename}>"
+          else
+            match
+          end
+        end
+        
+        if content != fixed_content
+          File.write(header_file, fixed_content)
+          puts "  Fixed: #{File.basename(header_file)}"
+        end
+      rescue => e
+        puts "  Warning: Could not fix #{File.basename(header_file)}: #{e.message}"
+      end
+    end
+  end
+  
+  # Fix GoogleUtilities headers
+  google_utilities_path = File.join(installer.sandbox.root, 'GoogleUtilities')
+  if Dir.exist?(google_utilities_path)
+    Dir.glob(File.join(google_utilities_path, '**/*.h')).each do |header_file|
+      begin
+        next if skip_files.include?(File.basename(header_file))
+        next unless File.exist?(header_file)
+        
+        File.chmod(0644, header_file) unless File.writable?(header_file)
+        content = File.read(header_file)
+        # Fix imports like #import "GULLoggerLevel.h" to #import <GoogleUtilities/GULLoggerLevel.h>
+        fixed_content = content.gsub(/#import\s+"([^"]+\.h)"/) do |match|
+          filename = $1
+          # Only fix if it's a GoogleUtilities header (starts with GUL)
+          if filename.start_with?('GUL')
+            "#import <GoogleUtilities/#{filename}>"
+          else
+            match
+          end
+        end
+        
+        if content != fixed_content
+          File.write(header_file, fixed_content)
+          puts "  Fixed: #{File.basename(header_file)}"
+        end
+      rescue => e
+        puts "  Warning: Could not fix #{File.basename(header_file)}: #{e.message}"
+      end
+    end
+  end
+  
+  # Fix Mantle headers
+  mantle_path = File.join(installer.sandbox.root, 'Mantle')
+  if Dir.exist?(mantle_path)
+    Dir.glob(File.join(mantle_path, '**/*.h')).each do |header_file|
+      begin
+        next if skip_files.include?(File.basename(header_file))
+        next unless File.exist?(header_file)
+        
+        File.chmod(0644, header_file) unless File.writable?(header_file)
+        content = File.read(header_file)
+        # Fix imports like #import "MTLModel.h" to #import <Mantle/MTLModel.h>
+        fixed_content = content.gsub(/#import\s+"([^"]+\.h)"/) do |match|
+          filename = $1
+          # Only fix if it's a Mantle header (starts with MTL or NSDictionary+MTL, etc.)
+          if filename.start_with?('MTL') || filename.include?('MTL') || filename.start_with?('NS')
+            "#import <Mantle/#{filename}>"
+          else
+            match
+          end
+        end
+        
+        if content != fixed_content
+          File.write(header_file, fixed_content)
+          puts "  Fixed: #{File.basename(header_file)}"
+        end
+      rescue => e
+        puts "  Warning: Could not fix #{File.basename(header_file)}: #{e.message}"
+      end
+    end
+  end
+  
+  # Fix ALL umbrella headers - both in Target Support Files AND in pod directories
+  puts "Fixing umbrella headers..."
+  
+  # First, fix umbrella headers in Target Support Files
+  umbrella_path = File.join(installer.sandbox.root, 'Target Support Files')
+  if Dir.exist?(umbrella_path)
+    Dir.glob(File.join(umbrella_path, '**/*-umbrella.h')).each do |umbrella_file|
+      begin
+        next unless File.exist?(umbrella_file)
+        File.chmod(0644, umbrella_file) unless File.writable?(umbrella_file)
+        content = File.read(umbrella_file)
+
+        # Remove Test/Test.h imports (these are placeholders that cause build errors)
+        fixed_content = content.gsub(/^#import\s+<Test\/Test\.h>\s*$/m, '')
+        fixed_content = fixed_content.gsub(/^#import\s+"Test\/Test\.h"\s*$/m, '')
+        fixed_content = fixed_content.gsub(/#import\s+<Test\/Test\.h>/, '')
+        fixed_content = fixed_content.gsub(/#import\s+"Test\/Test\.h"/, '')
+
+        # Also fix double-quoted includes for known frameworks
+        fixed_content = fixed_content.gsub(/#import\s+"([^"]+\.h)"/) do |match|
+          filename = $1
+          # Determine framework name from path
+          framework_name = File.dirname(umbrella_file).split('/').last.split('-').first
+          if framework_name == 'GoogleUtilities' || framework_name == 'Mantle' || framework_name == 'FirebaseCore' || framework_name == 'SDWebImageWebPCoder'
+            "#import <#{framework_name}/#{filename}>"
+          else
+            match
+          end
+        end
+
+        if content != fixed_content
+          File.write(umbrella_file, fixed_content)
+          puts "  Fixed umbrella: #{File.basename(umbrella_file)}"
+        end
+      rescue => e
+        puts "  Warning: Could not fix umbrella #{File.basename(umbrella_file)}: #{e.message}"
+      end
+    end
+  end
+  
+  # Also fix umbrella headers in individual pod directories (like sqflite_darwin)
+  Dir.glob(File.join(installer.sandbox.root, '**/*-umbrella.h')).each do |umbrella_file|
+    # Skip if we already processed it in Target Support Files
+    next if umbrella_file.include?('Target Support Files')
+    
+    begin
+      next unless File.exist?(umbrella_file)
+      File.chmod(0644, umbrella_file) unless File.writable?(umbrella_file)
+      content = File.read(umbrella_file)
+
+      # Remove Test/Test.h imports (these are placeholders that cause build errors)
+      fixed_content = content.gsub(/^#import\s+<Test\/Test\.h>\s*$/m, '')
+      fixed_content = fixed_content.gsub(/^#import\s+"Test\/Test\.h"\s*$/m, '')
+      fixed_content = fixed_content.gsub(/#import\s+<Test\/Test\.h>/, '')
+      fixed_content = fixed_content.gsub(/#import\s+"Test\/Test\.h"/, '')
+
+      if content != fixed_content
+        File.write(umbrella_file, fixed_content)
+        puts "  Fixed umbrella: #{File.basename(umbrella_file)}"
+      end
+    rescue => e
+      puts "  Warning: Could not fix umbrella #{File.basename(umbrella_file)}: #{e.message}"
+    end
+  end
+  
+  puts "Done fixing double-quoted includes."
+end

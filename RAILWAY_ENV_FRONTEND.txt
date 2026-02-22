@@ -1,0 +1,25 @@
+# Frontend Environment Variables for Railway
+# Copy these into Railway → Your Frontend Service → Variables
+
+# ============================================
+# API CONFIGURATION
+# Update this after backend is deployed!
+# ============================================
+VITE_API_URL=https://your-backend-url.railway.app/api
+
+# ============================================
+# GOOGLE MAPS (Add your key)
+# ============================================
+# VITE_GOOGLE_MAPS_API_KEY=your-google-maps-api-key-here
+
+# ============================================
+# STRIPE (If using donations/subscriptions)
+# ============================================
+# VITE_STRIPE_PUBLISHABLE_KEY=your-stripe-publishable-key
+
+# ============================================
+# FEATURE FLAGS (Optional)
+# ============================================
+# VITE_ENABLE_DONATIONS=true
+# VITE_ENABLE_SUBSCRIPTIONS=true
+
