@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guardian Connect — the free panic button that alerts your people</title>
+<meta name="description" content="Trigger an emergency, and the people you trust get alerted with your location, a group chat and a video room. Free. Not a 911 replacement — a personal safety network.">
+<style>
+  :root {
+    --red: #e53935; --red-dark: #b71c1c; --ink: #0f172a; --muted: #64748b;
+    --bg: #ffffff; --soft: #f8fafc; --blue: #2563eb;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); line-height: 1.6; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+
+  header.site { display: flex; justify-content: space-between; align-items: center; padding: 18px 0; }
+  .logo { font-weight: 800; font-size: 20px; }
+  .logo span { color: var(--red); }
+  .nav a { color: var(--ink); text-decoration: none; margin-left: 18px; font-weight: 600; font-size: 15px; }
+  .nav a.cta { color: white; background: var(--red); padding: 8px 16px; border-radius: 10px; }
+
+  .hero { text-align: center; padding: 64px 0 48px; }
+  .hero h1 { font-size: clamp(30px, 5.5vw, 52px); line-height: 1.15; letter-spacing: -0.02em; }
+  .hero h1 em { color: var(--red); font-style: normal; }
+  .hero p.sub { font-size: clamp(16px, 2.4vw, 20px); color: var(--muted); max-width: 640px; margin: 18px auto 0; }
+  .hero .actions { margin-top: 30px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: 14px 28px; border-radius: 12px; font-weight: 700; text-decoration: none; font-size: 17px; }
+  .btn.primary { background: var(--red); color: white; box-shadow: 0 8px 24px rgba(229,57,53,.35); }
+  .btn.ghost { color: var(--ink); border: 2px solid #e2e8f0; }
+  .honest { margin: 26px auto 0; max-width: 560px; background: #fef2f2; border: 1.5px solid var(--red); border-radius: 12px; padding: 12px 16px; font-size: 14px; font-weight: 600; color: var(--red-dark); }
+
+  section.steps { background: var(--soft); padding: 56px 0; }
+  h2.title { text-align: center; font-size: clamp(24px, 3.6vw, 34px); margin-bottom: 8px; }
+  p.lead { text-align: center; color: var(--muted); max-width: 620px; margin: 0 auto 36px; }
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+  .card { background: white; border-radius: 16px; padding: 26px 22px; box-shadow: 0 2px 12px rgba(15,23,42,.06); }
+  .card .num { width: 38px; height: 38px; border-radius: 50%; background: var(--red); color: white; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 18px; margin-bottom: 14px; }
+  .card h3 { font-size: 18px; margin-bottom: 6px; }
+  .card p { color: var(--muted); font-size: 15px; }
+
+  section.why { padding: 56px 0; }
+  .whygrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 28px; }
+  .why .card h3 { display: flex; gap: 8px; align-items: center; }
+
+  section.faq { background: var(--soft); padding: 56px 0; }
+  details { background: white; border-radius: 12px; padding: 16px 20px; margin-bottom: 10px; box-shadow: 0 1px 6px rgba(15,23,42,.05); }
+  summary { font-weight: 700; cursor: pointer; font-size: 16px; }
+  details p { margin-top: 10px; color: var(--muted); font-size: 15px; }
+
+  footer.site { padding: 36px 0 48px; text-align: center; color: var(--muted); font-size: 14px; }
+  footer .disclaimer { font-weight: 700; color: var(--red-dark); margin-bottom: 10px; }
+  footer a { color: var(--blue); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="site">
+    <div class="logo">🚨 Guardian<span>Connect</span></div>
+    <nav class="nav">
+      <a href="#how">How it works</a>
+      <a href="#faq">FAQ</a>
+      <a class="cta" href="https://app.guardianconnect.icu">Open the app</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h1>The free panic button that alerts <em>the people who'd actually come for you</em></h1>
+    <p class="sub">One tap sends your location to the contacts you chose, opens a group chat,
+    and connects everyone on a video call. No call center. No subscription. Your people.</p>
+    <div class="actions">
+      <a class="btn primary" href="https://app.guardianconnect.icu">Get protected — it's free</a>
+      <a class="btn ghost" href="#how">See how it works</a>
+    </div>
+    <div class="honest">⚠️ Honest by design: Guardian Connect is NOT a replacement for 911.
+    It alerts your personal network — call your local emergency number for life-threatening danger.</div>
+  </section>
+</div>
+
+<section class="steps" id="how">
+  <div class="wrap">
+    <h2 class="title">Protected in three steps</h2>
+    <p class="lead">From signup to safety net in under a minute.</p>
+    <div class="grid3">
+      <div class="card">
+        <div class="num">1</div>
+        <h3>Add your people</h3>
+        <p>Send one invite link to family or friends. When they join, you're automatically
+        each other's emergency contacts — both directions, no setup.</p>
+      </div>
+      <div class="card">
+        <div class="num">2</div>
+        <h3>Press the button</h3>
+        <p>In trouble? One tap. Your location is captured once and sent to every contact with a
+        loud alert that cuts through silent mode.</p>
+      </div>
+      <div class="card">
+        <div class="num">3</div>
+        <h3>They come to you</h3>
+        <p>Your people see where you are, tap "Navigate" to open their maps app, coordinate in
+        the group chat, and jump on a video call with you.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="why">
+  <div class="wrap">
+    <h2 class="title">Built for real life</h2>
+    <div class="whygrid">
+      <div class="card"><h3>🆓 Actually free</h3><p>No subscription, no premium tier for safety
+      features, no ads, no selling your data. Ever.</p></div>
+      <div class="card"><h3>📍 Location once, not tracking</h3><p>We capture your position when you
+      trigger an alert — we never track you in the background or outside emergencies.</p></div>
+      <div class="card"><h3>🎥 See and be seen</h3><p>Built-in group video call so your people can
+      see you're okay (or see what's happening) while they're on the way.</p></div>
+      <div class="card"><h3>🔇 Cuts through silence</h3><p>Emergency alerts are built to be loud —
+      they push through where a missed text wouldn't.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="faq" id="faq">
+  <div class="wrap">
+    <h2 class="title">Questions, answered honestly</h2>
+    <details>
+      <summary>Is this a replacement for calling 911?</summary>
+      <p>No — and we'll never pretend it is. Guardian Connect alerts the personal contacts you
+      chose. It does not contact police, fire, or medical services. For life-threatening
+      emergencies, call your local emergency number first. Think of Guardian Connect as the layer
+      AROUND emergency services: the people who'd drop everything for you.</p>
+    </details>
+    <details>
+      <summary>Who is it for?</summary>
+      <p>Anyone whose safety net is people: students walking home, parents and their kids, elderly
+      family members, lone workers, runners, travelers. If there are people who'd come for you,
+      Guardian Connect connects you to them when it matters.</p>
+    </details>
+    <details>
+      <summary>Does it track my location?</summary>
+      <p>No. Your location is captured once, at the moment you trigger an emergency (or when you
+      press "share my location" during one). There is no background tracking, no location history
+      outside emergencies, and your location is only ever visible to the contacts in that
+      emergency. See the <a href="https://app.guardianconnect.icu/privacy.html">Privacy Policy</a>.</p>
+    </details>
+    <details>
+      <summary>What does it cost?</summary>
+      <p>Nothing. Guardian Connect is free. If it earns your trust, optional donations keep the
+      lights on — but safety features will never be behind a paywall.</p>
+    </details>
+    <details>
+      <summary>Can the alert fail?</summary>
+      <p>Yes, and you should know that: alerts depend on phone batteries, signal, notification
+      permissions, and your contacts being reachable. That's true of every app like this — we just
+      say it out loud. Never rely on any app as your only safety measure.</p>
+    </details>
+  </div>
+</section>
+
+<footer class="site">
+  <div class="wrap">
+    <p class="disclaimer">Guardian Connect is not an emergency service and is not a replacement
+    for 911 or your local emergency number.</p>
+    <p>
+      <a href="https://app.guardianconnect.icu/terms.html">Terms of Service</a> ·
+      <a href="https://app.guardianconnect.icu/privacy.html">Privacy Policy</a> ·
+      <a href="mailto:hello@guardianconnect.icu">Contact</a>
+    </p>
+    <p style="margin-top:8px;">© 2026 Guardian Connect</p>
+  </div>
+</footer>
+
+</body>
+</html>

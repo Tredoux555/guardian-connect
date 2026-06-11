@@ -40,7 +40,7 @@ router.post(
         });
       }
 
-      const { email, password, display_name } = req.body;
+      const { email, password, display_name, inviteToken } = req.body;
 
       // Check if user exists
       const existingUser = await User.findByEmail(email);
@@ -50,6 +50,24 @@ router.post(
 
       // Create user
       const user = await User.create(email, password, display_name);
+
+      // Invite-link onboarding: registering through a contact's invite link
+      // makes you mutual emergency contacts immediately (best-effort —
+      // registration must never fail because of a bad/expired invite).
+      let invitedBy: string | null = null;
+      if (inviteToken && typeof inviteToken === 'string') {
+        try {
+          const { verifyInviteToken } = await import('../services/jwt');
+          const invite = verifyInviteToken(inviteToken);
+          if (invite) {
+            const { linkMutualContacts } = await import('../services/contactLink');
+            const linked = await linkMutualContacts(invite.inviterId, user.id);
+            if (linked) invitedBy = invite.inviterId;
+          }
+        } catch (e) {
+          console.warn('Invite link processing failed (registration continues):', e);
+        }
+      }
 
       // Generate verification token
       const verificationToken = uuidv4();
@@ -74,6 +92,7 @@ router.post(
           display_name: user.display_name,
           verified: user.verified,
         },
+        ...(invitedBy ? { contactLinked: true } : {}),
       });
     } catch (error) {
       console.error('Registration error:', error);

@@ -30,6 +30,17 @@ function Home() {
   const [loading, setLoading] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [pendingEmergencies, setPendingEmergencies] = useState<any[]>([])
+  // null = unknown (loading); 0 = user has no contacts → guide them first
+  const [contactCount, setContactCount] = useState<number | null>(null)
+
+  const loadContactCount = async () => {
+    try {
+      const response = await api.get('/contacts')
+      setContactCount(Array.isArray(response.data) ? response.data.length : null)
+    } catch {
+      setContactCount(null) // unknown — don't block the emergency button
+    }
+  }
 
   const loadUser = async () => {
     try {
@@ -76,6 +87,7 @@ function Home() {
 
   useEffect(() => {
     loadUser()
+    loadContactCount()
     checkActiveEmergency()
     checkPendingEmergencies()
     const interval = setInterval(() => {
@@ -406,10 +418,26 @@ function Home() {
           </div>
         )}
 
+        {contactCount === 0 && !activeEmergency && (
+          <div style={{ background: '#fffbeb', border: '2px solid #f59e0b', borderRadius: 12, padding: 16, marginBottom: 16, textAlign: 'center', lineHeight: 1.5 }}>
+            <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 16 }}>👋 One step to get protected</p>
+            <p style={{ margin: '0 0 10px', fontSize: 14 }}>
+              An emergency alert goes to <strong>your contacts</strong> — right now you have none,
+              so nobody would be notified. Add your first contact (takes under a minute).
+            </p>
+            <button
+              onClick={() => navigate('/contacts')}
+              style={{ padding: '10px 18px', borderRadius: 10, border: 'none', background: '#f59e0b', color: 'white', fontWeight: 700, fontSize: 15, cursor: 'pointer' }}
+            >
+              Add your contacts →
+            </button>
+          </div>
+        )}
+
         <div className="emergency-section">
           <h2>Emergency Alert</h2>
           <p className="subtitle">Click the button to trigger an emergency</p>
-          
+
           {activeEmergency ? (
             <div className="active-emergency">
               <p>Emergency Active!</p>

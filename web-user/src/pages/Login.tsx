@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../services/api'
 import './Login.css'
 
 function Login() {
-  const [isRegistering, setIsRegistering] = useState(false)
+  const [searchParams] = useSearchParams()
+  const inviteToken = searchParams.get('invite')
+  const [isRegistering, setIsRegistering] = useState(!!searchParams.get('invite'))
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
@@ -33,10 +35,15 @@ function Login() {
           email,
           password,
           display_name: displayName.trim() || undefined, // Only send if provided
+          inviteToken: inviteToken || undefined, // invite-link onboarding
         })
-        
+
         if (response.data.user) {
-          setError('Registration successful! Please verify your email or ask an admin to verify your account.')
+          setError(
+            response.data.contactLinked
+              ? 'Registration successful — you and your inviter are now emergency contacts! Log in to get started.'
+              : 'Registration successful! Please verify your email or ask an admin to verify your account.'
+          )
           setIsRegistering(false) // Switch back to login
           setDisplayName('')
         }
@@ -114,6 +121,12 @@ function Login() {
     <div className="login-container">
       <div className="login-box">
         <h1>Guardian Connect</h1>
+        {inviteToken && (
+          <div style={{ background: '#eff6ff', border: '1px solid #2563eb', borderRadius: 8, padding: '10px 12px', marginBottom: '1rem', fontSize: '0.9rem', color: '#1e40af' }}>
+            🤝 You've been invited! Register below and you'll automatically become each
+            other's emergency contacts.
+          </div>
+        )}
         <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
           <button
             type="button"

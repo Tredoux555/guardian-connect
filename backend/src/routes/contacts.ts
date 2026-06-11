@@ -7,6 +7,24 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 
+// Shareable invite link — the easiest way to add a contact. The receiver
+// registers through the link and you become mutual emergency contacts
+// automatically (no exact-email guessing). Stateless signed token, 30 days.
+router.get('/invite-link', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { generateInviteToken } = await import('../services/jwt');
+    const token = generateInviteToken(req.userId!);
+    const appUrl = process.env.APP_URL || 'http://localhost:3000';
+    res.json({
+      inviteUrl: `${appUrl}/login?invite=${encodeURIComponent(token)}`,
+      expiresInDays: 30,
+    });
+  } catch (error) {
+    console.error('Invite link error:', error);
+    res.status(500).json({ error: 'Failed to create invite link' });
+  }
+});
+
 // Get all contacts
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
