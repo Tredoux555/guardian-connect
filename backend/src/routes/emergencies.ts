@@ -89,7 +89,18 @@ router.post(
         },
         ...(warning ? { warning } : {}),
       });
-    } catch (error) {
+    } catch (error: any) {
+      // Concurrent create resolved inside the transaction (advisory lock)
+      if (error?.code === 'ACTIVE_EMERGENCY_EXISTS') {
+        return res.status(400).json({
+          error: 'You already have an active emergency',
+          emergencyId: error.emergencyId,
+        });
+      }
+      // Unique-index violation (db/RUN_THESE/01 defense-in-depth, if applied)
+      if (error?.code === '23505') {
+        return res.status(400).json({ error: 'You already have an active emergency' });
+      }
       console.error('Create emergency error:', error);
       res.status(500).json({ error: 'Failed to create emergency' });
     }

@@ -27,6 +27,22 @@ export class Emergency {
     unregisteredContacts: number;
   }> {
     return transaction(async (client) => {
+      // Serialize concurrent creates per user (audit fix: race condition where
+      // two simultaneous requests could both pass the "no active emergency"
+      // pre-check). The advisory lock is transaction-scoped and auto-released.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`emergency_create:${userId}`]);
+
+      const existing = await client.query(
+        `SELECT id FROM emergencies WHERE user_id = $1 AND status = 'active' LIMIT 1`,
+        [userId]
+      );
+      if (existing.rows.length > 0) {
+        const err: any = new Error('Active emergency already exists');
+        err.code = 'ACTIVE_EMERGENCY_EXISTS';
+        err.emergencyId = existing.rows[0].id;
+        throw err;
+      }
+
       const eRes = await client.query(
         `INSERT INTO emergencies (user_id, status)
          VALUES ($1, 'active')

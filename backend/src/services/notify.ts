@@ -96,16 +96,22 @@ function scheduleRetry(
   const delay = RETRY_DELAYS_MS[attempt];
   console.warn(`🔁 Scheduling notification retry #${attempt + 1} in ${delay / 1000}s for user ${userId} (emergency ${ctx.emergencyId})`);
   const timer = setTimeout(async () => {
-    const [fcm, webPush] = await Promise.all([
-      attemptFcm(userId, ctx, hasToken),
-      attemptWebPush(userId, ctx),
-    ]);
-    const ok = fcm === 'sent' || webPush === 'sent';
-    if (ok) {
-      console.log(`✅ Notification retry #${attempt + 1} succeeded for user ${userId} (emergency ${ctx.emergencyId})`);
-    } else if (fcm === 'no_token' && webPush === 'no_subscription') {
-      console.error(`🔴 User ${userId} has no push channel registered — cannot alert by push (emergency ${ctx.emergencyId})`);
-    } else {
+    try {
+      const [fcm, webPush] = await Promise.all([
+        attemptFcm(userId, ctx, hasToken),
+        attemptWebPush(userId, ctx),
+      ]);
+      const ok = fcm === 'sent' || webPush === 'sent';
+      if (ok) {
+        console.log(`✅ Notification retry #${attempt + 1} succeeded for user ${userId} (emergency ${ctx.emergencyId})`);
+      } else if (fcm === 'no_token' && webPush === 'no_subscription') {
+        console.error(`🔴 User ${userId} has no push channel registered — cannot alert by push (emergency ${ctx.emergencyId})`);
+      } else {
+        scheduleRetry(userId, ctx, hasToken, attempt + 1);
+      }
+    } catch (err) {
+      // Never let a retry kill the process — log and keep retrying.
+      console.error(`🔴 Notification retry #${attempt + 1} threw for user ${userId} (emergency ${ctx.emergencyId}):`, err);
       scheduleRetry(userId, ctx, hasToken, attempt + 1);
     }
   }, delay);
