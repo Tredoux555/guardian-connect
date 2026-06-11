@@ -4,17 +4,9 @@ import { Emergency } from '../models/Emergency';
 import { upload, getImageUrl, getAudioUrl, getVideoUrl } from '../services/fileUpload';
 import { emitToEmergency } from '../services/socket';
 import { AuthRequest, authenticate } from '../middleware/auth';
-import rateLimit from 'express-rate-limit';
+import { messageLimiter } from '../middleware/rateLimits';
 
 const router = express.Router();
-
-// Rate limiting for message sending (prevent spam)
-const messageLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 20, // 20 messages per minute
-  message: 'Too many messages sent. Please wait a moment.',
-  skip: () => process.env.NODE_ENV !== 'production', // Disable in development
-});
 
 /**
  * GET /api/emergencies/:id/messages

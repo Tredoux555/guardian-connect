@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import rateLimit from 'express-rate-limit';
+import { authLimiter, passwordResetLimiter } from '../middleware/rateLimits';
 import { User } from '../models/User';
 import { generateTokens, createSession, deleteSession, verifyToken } from '../services/jwt';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email';
@@ -10,17 +10,9 @@ import { AuthRequest, authenticate } from '../middleware/auth';
 
 const router = express.Router();
 
-// Rate limiting
-// TODO: RE-ENABLE RATE LIMITING BEFORE PRODUCTION DEPLOYMENT!
-// Rate limiting is currently disabled for development. Must be re-enabled for production.
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 requests per window
-  message: 'Too many authentication attempts, please try again later.',
-});
-
-// Disable rate limiting in development
-const rateLimiter = process.env.NODE_ENV === 'production' ? authLimiter : (req: any, res: any, next: any) => next();
+// Rate limiting: ON by default in every environment (see middleware/rateLimits.ts).
+// Set DISABLE_RATE_LIMIT=true explicitly for local development only.
+const rateLimiter = authLimiter;
 
 // Register
 router.post(
@@ -231,7 +223,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
 // Forgot Password
 router.post(
   '/forgot-password',
-  authLimiter,
+  passwordResetLimiter,
   [body('email').isEmail().normalizeEmail()],
   async (req: Request, res: Response) => {
     try {

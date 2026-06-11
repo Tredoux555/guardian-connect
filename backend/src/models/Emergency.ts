@@ -13,6 +13,60 @@ export class Emergency {
     return result.rows[0];
   }
 
+  /**
+   * Atomically create an emergency AND its participant rows in one DB
+   * transaction (audit P0 #5: no partial writes — an emergency must never
+   * exist without its participants, or vice versa).
+   *
+   * Returns the emergency plus the registered contacts that became
+   * participants and the count of unregistered contacts that could not.
+   */
+  static async createWithParticipants(userId: string): Promise<{
+    emergency: EmergencyType;
+    participants: Array<{ userId: string; name: string | null; hasFcmToken: boolean }>;
+    unregisteredContacts: number;
+  }> {
+    return transaction(async (client) => {
+      const eRes = await client.query(
+        `INSERT INTO emergencies (user_id, status)
+         VALUES ($1, 'active')
+         RETURNING id, user_id, status, created_at, ended_at`,
+        [userId]
+      );
+      const emergency = eRes.rows[0];
+
+      const cRes = await client.query(
+        `SELECT ec.contact_user_id, ec.contact_name, u.fcm_token
+         FROM emergency_contacts ec
+         LEFT JOIN users u ON u.id = ec.contact_user_id
+         WHERE ec.user_id = $1 AND ec.status = 'active'`,
+        [userId]
+      );
+
+      const registered = cRes.rows.filter((c: any) => c.contact_user_id);
+      const unregisteredContacts = cRes.rows.length - registered.length;
+
+      for (const contact of registered) {
+        await client.query(
+          `INSERT INTO emergency_participants (emergency_id, user_id, status)
+           VALUES ($1, $2, 'pending')
+           ON CONFLICT (emergency_id, user_id) DO NOTHING`,
+          [emergency.id, contact.contact_user_id]
+        );
+      }
+
+      return {
+        emergency,
+        participants: registered.map((c: any) => ({
+          userId: c.contact_user_id,
+          name: c.contact_name || null,
+          hasFcmToken: c.fcm_token != null && String(c.fcm_token).trim().length > 0,
+        })),
+        unregisteredContacts,
+      };
+    });
+  }
+
   static async findById(id: string): Promise<EmergencyType | null> {
     const result = await query(
       'SELECT id, user_id, status, created_at, ended_at FROM emergencies WHERE id = $1',

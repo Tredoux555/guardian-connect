@@ -3,15 +3,17 @@ import { body, validationResult } from 'express-validator';
 import { query } from '../database/db';
 import { sendBroadcastNotification } from '../services/push';
 import { AuthRequest, authenticate, requireAdmin } from '../middleware/auth';
+import { adminLoginLimiter } from '../middleware/rateLimits';
 import { User } from '../models/User';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 
 const router = express.Router();
 
-// Admin login
+// Admin login (rate limited — was previously unprotected)
 router.post(
   '/login',
+  adminLoginLimiter,
   [
     body('email').isEmail(),
     body('password').notEmpty(),

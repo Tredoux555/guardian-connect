@@ -2,11 +2,12 @@ import express, { Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { Emergency } from '../models/Emergency';
 import { query } from '../database/db';
-import { sendEmergencyAlert } from '../services/push';
-import { sendEmergencyWebPush } from '../services/webPush';
-import { emitToEmergency, emitToUser } from '../services/socket';
+import { emitToEmergency } from '../services/socket';
+import { notifyEmergencyParticipants } from '../services/notify';
 import { AuthRequest, authenticate } from '../middleware/auth';
+import { getEmergencyAccess } from '../utils/authz';
 import { getUserDisplayName } from '../utils/userDisplay';
+import { emergencyCreateLimiter } from '../middleware/rateLimits';
 import messageRoutes from './messages';
 
 const router = express.Router();
@@ -15,10 +16,11 @@ const router = express.Router();
 router.post(
   '/create',
   authenticate,
+  emergencyCreateLimiter,
   async (req: AuthRequest, res: Response) => {
     try {
       const userId = req.userId!;
-      
+
       // Check if user already has an active emergency
       const activeEmergency = await Emergency.findActiveByUserId(userId);
       if (activeEmergency) {
@@ -28,42 +30,15 @@ router.post(
         });
       }
 
-      // Create emergency
-      const emergency = await Emergency.create(userId);
-      console.log(`🚨 Emergency created: ${emergency.id} by user ${userId}`);
-
-      // Get user's emergency contacts
-      const contactsResult = await query(
-        `SELECT ec.contact_user_id, ec.contact_email, ec.contact_phone, ec.contact_name
-         FROM emergency_contacts ec
-         WHERE ec.user_id = $1 AND ec.status = 'active'`,
-        [userId]
+      // Atomically create emergency + participants (single DB transaction)
+      const { emergency, participants, unregisteredContacts } =
+        await Emergency.createWithParticipants(userId);
+      console.log(
+        `🚨 Emergency created: ${emergency.id} by user ${userId} ` +
+        `(${participants.length} participants, ${unregisteredContacts} unregistered contacts skipped)`
       );
 
-      const contacts = contactsResult.rows;
-      console.log(`📋 Found ${contacts.length} emergency contacts for user ${userId}:`);
-      contacts.forEach((c: any, i: number) => {
-        console.log(`   ${i + 1}. ${c.contact_name || 'Unknown'} (${c.contact_email}) - user_id: ${c.contact_user_id || 'NOT REGISTERED'}`);
-      });
-
-      // Add all contacts as participants (status: pending)
-      const participantPromises = contacts.map(async (contact: any) => {
-        if (contact.contact_user_id) {
-          // Contact is a registered user
-          await Emergency.addParticipant(emergency.id, contact.contact_user_id);
-          console.log(`   ✅ Added participant: ${contact.contact_user_id}`);
-          return { userId: contact.contact_user_id, name: contact.contact_name };
-        }
-        console.log(`   ⚠️ Contact ${contact.contact_email} is NOT a registered user - cannot notify`);
-        return null;
-      });
-
-      const participants = (await Promise.all(participantPromises)).filter(
-        (p: any) => p !== null
-      );
-      console.log(`👥 Total participants to notify: ${participants.length}`);
-
-      // Get sender display name and email for notifications
+      // Sender identity for notifications
       const userResult = await query(
         'SELECT display_name, email FROM users WHERE id = $1',
         [userId]
@@ -71,76 +46,34 @@ router.post(
       const senderUser = userResult.rows[0] || { email: 'Someone' };
       const senderDisplayName = getUserDisplayName(senderUser);
 
-      // Send notifications to all registered contacts
-      console.log(`📤 Starting notification process for ${participants.length} participant(s)...`);
+      // Fan out notifications with per-recipient delivery tracking + retries.
+      // Failures are surfaced to the caller — never silently swallowed.
+      const deliveries = await notifyEmergencyParticipants(
+        {
+          emergencyId: emergency.id,
+          senderName: senderDisplayName,
+          senderEmail: senderUser.email || null,
+          senderUserId: userId,
+        },
+        participants
+      );
 
-      // Batch query: get all FCM tokens in one query instead of N+1
-      const participantIds = participants.filter((p: any) => p?.userId).map((p: any) => p.userId);
-      const fcmTokenResult = participantIds.length > 0
-        ? await query(
-            'SELECT id, fcm_token FROM users WHERE id = ANY($1)',
-            [participantIds]
-          )
-        : { rows: [] };
-      const fcmTokenMap = new Map<string, string | null>();
-      fcmTokenResult.rows.forEach((r: any) => fcmTokenMap.set(r.id, r.fcm_token));
+      const alertedCount = deliveries.filter((d) => d.delivered).length;
+      const socketOnlyCount = deliveries.filter((d) => !d.delivered && d.socket === 'sent').length;
+      const failed = deliveries
+        .filter((d) => !d.delivered)
+        .map((d) => ({ userId: d.userId, name: d.name, fcm: d.fcm, webPush: d.webPush, socket: d.socket }));
 
-      for (const participant of participants) {
-        if (participant && participant.userId) {
-          console.log(`📤 Notifying: ${participant.userId} (${participant.name})`);
-
-          // Use pre-fetched FCM token (no extra query)
-          const fcmToken = fcmTokenMap.get(participant.userId);
-          const hasFcmToken = fcmToken != null && fcmToken.toString().trim().length > 0;
-
-          // Send Firebase push notification (for mobile apps)
-          if (hasFcmToken) {
-            try {
-              await sendEmergencyAlert(
-                participant.userId,
-                emergency.id,
-                senderDisplayName,
-                undefined // Location will be sent when user accepts
-              );
-              console.log(`   ✅ Firebase push sent to ${participant.userId}`);
-            } catch (error: any) {
-              console.error(`   ❌ Firebase alert failed for ${participant.userId}: ${error?.message || error}`);
-            }
-          } else {
-            console.log(`   ⚠️ No FCM token for ${participant.userId} - skipping Firebase push`);
-          }
-
-          // Send Web Push notification (for web browsers - works even when app is closed)
-          try {
-            await sendEmergencyWebPush(
-              participant.userId,
-              emergency.id,
-              senderDisplayName
-            );
-            console.log(`   ✅ Web push sent to ${participant.userId}`);
-          } catch (error: any) {
-            console.error(`   ❌ Failed to send web push to ${participant.userId}:`, error?.message || error);
-          }
-
-          // Emit socket event (for real-time updates when app is open)
-          try {
-            console.log(`   📡 Emitting socket event 'emergency_created' to user:${participant.userId}`);
-            emitToUser(participant.userId, 'emergency_created', {
-              emergencyId: emergency.id,
-              userId,
-              userEmail: senderUser.email,
-              senderName: senderDisplayName,
-              participants: participants.length,
-            });
-            console.log(`   ✅ Socket event emitted to user:${participant.userId}`);
-          } catch (error: any) {
-            console.error(`   ❌ Failed to emit socket event to ${participant.userId}:`, error?.message || error);
-          }
-          
-          console.log(`📤 === END NOTIFICATION ATTEMPT FOR: ${participant.userId} ===\n`);
-        }
+      let warning: string | undefined;
+      if (participants.length === 0) {
+        warning = unregisteredContacts > 0
+          ? 'None of your emergency contacts have a Guardian Connect account yet — nobody was alerted. Ask them to sign up.'
+          : 'You have no emergency contacts — nobody was alerted. Add contacts now.';
+      } else if (alertedCount === 0 && socketOnlyCount === 0) {
+        warning = 'Your emergency was created but we could not reach any of your contacts. We are retrying. Consider calling your local emergency number.';
+      } else if (alertedCount === 0) {
+        warning = 'Push notifications failed; contacts with the app open were reached. We are retrying push delivery.';
       }
-      console.log(`✅ Emergency ${emergency.id} created and all notifications sent`)
 
       res.status(201).json({
         emergency: {
@@ -149,6 +82,12 @@ router.post(
           createdAt: emergency.created_at,
         },
         participantsCount: participants.length,
+        notifications: {
+          alerted: alertedCount,
+          socketOnly: socketOnlyCount,
+          failed,
+        },
+        ...(warning ? { warning } : {}),
       });
     } catch (error) {
       console.error('Create emergency error:', error);
@@ -401,24 +340,63 @@ router.get('/active', authenticate, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Get emergency history
+// NOTE: must be registered BEFORE '/:id' or Express matches "history" as an id.
+router.get(
+  '/history',
+  authenticate,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const userId = req.userId!;
+      const page = parseInt(req.query.page as string) || 0;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+      const offset = page * limit;
+
+      // Get emergencies where user was sender or participant
+      const result = await query(
+        `SELECT DISTINCT e.*,
+         COUNT(DISTINCT ep.user_id) FILTER (WHERE ep.status = 'accepted') as responder_count
+         FROM emergencies e
+         LEFT JOIN emergency_participants ep ON e.id = ep.emergency_id
+         WHERE (e.user_id = $1 OR ep.user_id = $1)
+         AND e.status IN ('ended', 'cancelled', 'escalated')
+         GROUP BY e.id
+         ORDER BY e.created_at DESC
+         LIMIT $2 OFFSET $3`,
+        [userId, limit, offset]
+      );
+
+      res.json(result.rows);
+    } catch (error) {
+      console.error('Get emergency history error:', error);
+      res.status(500).json({ error: 'Failed to get emergency history' });
+    }
+  }
+);
+
 // Get emergency details
+// SECURITY: only the emergency owner or an invited participant may view an
+// emergency (and its locations). Previously ANY logged-in user could read
+// any emergency — the #1 finding in the launch audit.
 router.get('/:id', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const emergencyId = req.params.id;
-    const emergency = await Emergency.findById(emergencyId);
+    const userId = req.userId!;
 
-    if (!emergency) {
+    const access = await getEmergencyAccess(emergencyId, userId);
+    if (!access.emergency) {
+      return res.status(404).json({ error: 'Emergency not found' });
+    }
+    if (!access.canView) {
+      // 404 (not 403) so we don't leak which emergency IDs exist
       return res.status(404).json({ error: 'Emergency not found' });
     }
 
-    // Get participants
     const participants = await Emergency.getParticipants(emergencyId);
-
-    // Get latest locations (only for accepted participants)
     const locations = await Emergency.getLatestLocations(emergencyId);
 
     res.json({
-      emergency,
+      emergency: access.emergency,
       participants,
       locations,
     });
@@ -496,78 +474,35 @@ router.post(
   }
 );
 
-// Escalate emergency to emergency services
+// Escalate emergency to emergency services — NOT IMPLEMENTED.
+// HONESTY FIX: the old handler logged the request and replied
+// "Emergency escalated to emergency services" while doing NOTHING.
+// For a safety app, a fake 911 claim is dangerous (false sense of rescue)
+// and a serious liability. Until a real integration exists (e.g. Twilio
+// SMS to designated numbers), this endpoint tells the truth.
 router.post(
   '/:id/escalate',
   authenticate,
   async (req: AuthRequest, res: Response) => {
     try {
       const emergencyId = req.params.id;
-      const { reason, latitude, longitude, sender_name } = req.body;
-      
-      // Get emergency
-      const emergency = await Emergency.findById(emergencyId);
-      if (!emergency) {
+      const userId = req.userId!;
+
+      const access = await getEmergencyAccess(emergencyId, userId);
+      if (!access.emergency || !access.canView) {
         return res.status(404).json({ error: 'Emergency not found' });
       }
-      
-      // Log escalation
-      console.log(`🚨 ESCALATION: Emergency ${emergencyId} escalated to emergency services`);
-      console.log(`   Reason: ${reason}`);
-      console.log(`   Location: ${latitude}, ${longitude}`);
-      console.log(`   Sender: ${sender_name}`);
-      
-      // TODO: Integrate with emergency services API (911, etc.)
-      // For now, just log the escalation (update method not implemented yet)
-      console.log(`   Status: Emergency marked as escalated (in logs only - DB update pending)`);
-      
-      // Notify all participants
-      emitToEmergency(emergencyId, 'emergency_escalated', {
-        emergencyId,
-        reason,
-        escalatedAt: new Date().toISOString(),
-      });
-      
-      res.json({ 
-        message: 'Emergency escalated to emergency services',
-        escalatedAt: new Date().toISOString(),
+
+      console.warn(`⚠️ Escalation requested for emergency ${emergencyId} by ${userId} — feature not implemented, refusing honestly.`);
+
+      res.status(501).json({
+        error: 'Escalation to emergency services is not available yet.',
+        message: 'Guardian Connect cannot contact 911 or other emergency services. If you need emergency services, call your local emergency number directly.',
+        feature: 'coming_soon',
       });
     } catch (error) {
       console.error('Escalate emergency error:', error);
-      res.status(500).json({ error: 'Failed to escalate emergency' });
-    }
-  }
-);
-
-// Get emergency history
-router.get(
-  '/history',
-  authenticate,
-  async (req: AuthRequest, res: Response) => {
-    try {
-      const userId = req.userId!;
-      const page = parseInt(req.query.page as string) || 0;
-      const limit = parseInt(req.query.limit as string) || 50;
-      const offset = page * limit;
-      
-      // Get emergencies where user was sender or participant
-      const result = await query(
-        `SELECT DISTINCT e.*, 
-         COUNT(DISTINCT ep.user_id) FILTER (WHERE ep.status = 'accepted') as responder_count
-         FROM emergencies e
-         LEFT JOIN emergency_participants ep ON e.id = ep.emergency_id
-         WHERE (e.user_id = $1 OR ep.user_id = $1)
-         AND e.status IN ('ended', 'cancelled', 'escalated')
-         GROUP BY e.id
-         ORDER BY e.created_at DESC
-         LIMIT $2 OFFSET $3`,
-        [userId, limit, offset]
-      );
-      
-      res.json(result.rows);
-    } catch (error) {
-      console.error('Get emergency history error:', error);
-      res.status(500).json({ error: 'Failed to get emergency history' });
+      res.status(500).json({ error: 'Failed to process escalation request' });
     }
   }
 );
