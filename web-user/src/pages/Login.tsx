@@ -197,6 +197,16 @@ function Login() {
           </button>
         </form>
         {/* Test credentials removed for production */}
+        <div style={{ marginTop: '1.25rem', textAlign: 'center', fontSize: '0.8rem', color: '#666', lineHeight: 1.5 }}>
+          <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: '#b91c1c' }}>
+            ⚠️ Guardian Connect alerts your personal contacts. It is NOT a replacement for 911 or
+            your local emergency services.
+          </p>
+          {isRegistering ? 'By registering you agree to our ' : ''}
+          <a href="/terms.html" style={{ color: '#2563eb' }}>Terms of Service</a>
+          {' · '}
+          <a href="/privacy.html" style={{ color: '#2563eb' }}>Privacy Policy</a>
+        </div>
       </div>
     </div>
   )

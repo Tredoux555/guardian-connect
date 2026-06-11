@@ -428,6 +428,14 @@ function Home() {
           )}
         </div>
       </main>
+      <footer style={{ textAlign: 'center', padding: '16px', fontSize: '0.78rem', color: '#777', lineHeight: 1.5 }}>
+        <p style={{ margin: '0 0 4px', fontWeight: 600, color: '#b91c1c' }}>
+          Not a replacement for 911 — in a life-threatening emergency, call your local emergency number.
+        </p>
+        <a href="/terms.html" style={{ color: '#2563eb' }}>Terms</a>
+        {' · '}
+        <a href="/privacy.html" style={{ color: '#2563eb' }}>Privacy</a>
+      </footer>
       <LogViewer />
     </div>
   )
