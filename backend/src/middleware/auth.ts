@@ -29,6 +29,13 @@ export const authenticate = async (
     }
 
     const decoded = jwt.verify(token, secret) as JWTPayload;
+
+    // Defense-in-depth: only ACCESS tokens carry userId. Other token types
+    // signed with the same secret (e.g. contact-invite tokens) must never
+    // authenticate a request.
+    if (!decoded.userId) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
     
     // For admin tokens, skip session check (admin tokens are JWT-only, no sessions)
     // For user tokens, we verify the JWT itself is valid (sessions are for refresh tokens only)
