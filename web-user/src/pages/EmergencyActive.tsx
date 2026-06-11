@@ -12,6 +12,7 @@ import {
   removeListener
 } from '../services/socket'
 import { EmergencyChat } from '../components/EmergencyChat'
+import { VideoRoom } from '../components/VideoRoom'
 import './EmergencyActive.css'
 
 interface Location {
@@ -329,6 +330,12 @@ function EmergencyActive() {
             })
           )}
         </div>
+      </div>
+
+      {/* Video Call Section — group video room for everyone on board */}
+      <div className="chat-section">
+        <h3 className="section-title">🎥 Video Call</h3>
+        <VideoRoom emergencyId={id!} />
       </div>
 
       {/* Chat Section */}

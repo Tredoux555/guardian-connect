@@ -485,6 +485,36 @@ router.post(
   }
 );
 
+// Video room credentials (Agora) — owner or invited participant only.
+// Static-location + group-video model: once responders are on board they
+// coordinate by video. Returns 503 when video isn't configured so the
+// client can hide the button gracefully.
+router.get('/:id/video-token', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const emergencyId = req.params.id;
+    const userId = req.userId!;
+
+    const access = await getEmergencyAccess(emergencyId, userId);
+    if (!access.emergency || !access.canView) {
+      return res.status(404).json({ error: 'Emergency not found' });
+    }
+    if (access.emergency.status !== 'active') {
+      return res.status(400).json({ error: 'Emergency is not active' });
+    }
+
+    const { getVideoCredentials } = await import('../services/agora');
+    const creds = getVideoCredentials(emergencyId);
+    if (!creds) {
+      return res.status(503).json({ error: 'Video calling is not configured', code: 'VIDEO_NOT_CONFIGURED' });
+    }
+
+    res.json(creds);
+  } catch (error) {
+    console.error('Video token error:', error);
+    res.status(500).json({ error: 'Failed to get video credentials' });
+  }
+});
+
 // Escalate emergency to emergency services — NOT IMPLEMENTED.
 // HONESTY FIX: the old handler logged the request and replied
 // "Emergency escalated to emergency services" while doing NOTHING.
