@@ -10,18 +10,15 @@
     "start": "npx serve -s dist -l $PORT"
   },
   "dependencies": {
-    "@react-google-maps/api": "^2.20.7",
     "@stripe/react-stripe-js": "^5.3.0",
     "@stripe/stripe-js": "^8.4.0",
     "axios": "^1.6.2",
-    "open-location-code": "^1.0.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.28.0",
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
-    "@types/google.maps": "^3.58.1",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^4.2.1",

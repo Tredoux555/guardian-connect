@@ -105,11 +105,11 @@ function EmergencyActive() {
     return () => removeListener('location_update', handleLocationUpdate)
   }, [id, emergency])
 
-  // Load emergency data
+  // Load emergency data once — static-location model (Jun 2026 pivot):
+  // location is captured at trigger/accept time and shared via socket events;
+  // no polling loop. Manual "Update location" re-shares on demand.
   useEffect(() => {
     loadEmergency()
-    const interval = setInterval(loadEmergency, 10000)
-    return () => clearInterval(interval)
   }, [id])
 
   const loadEmergency = async () => {
@@ -187,16 +187,16 @@ function EmergencyActive() {
     )
   }
 
-  // Open native maps app for navigation
-  const navigateToLocation = (lat: number, lng: number, name: string) => {
+  // Open the user's maps app for turn-by-turn navigation. Google Maps by
+  // default (universal), Apple Maps on iOS. Plain https deep-links — the OS
+  // hands them to the native app; no embedded map, no API key, no billing.
+  const navigateToLocation = (lat: number, lng: number, _name: string) => {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-    
+
     if (isIOS) {
-      // Apple Maps
-      window.open(`maps://maps.apple.com/?daddr=${lat},${lng}&dirflg=d`, '_blank')
+      window.open(`https://maps.apple.com/?daddr=${lat},${lng}`, '_blank')
     } else {
-      // Google Maps
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`, '_blank')
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank')
     }
   }
 
@@ -256,10 +256,14 @@ function EmergencyActive() {
         </p>
       </div>
 
-      {/* Connection Status */}
+      {/* Status — static-location model: positions are shared snapshots, not live tracking */}
       <div className="connection-status">
         <div className="status-dot"></div>
-        <span className="status-text">Connected • {locations.length} people tracking</span>
+        <span className="status-text">
+          {locations.length === 0
+            ? 'No locations shared yet'
+            : `${locations.length} location${locations.length === 1 ? '' : 's'} shared`}
+        </span>
       </div>
 
       {/* Location Section */}
