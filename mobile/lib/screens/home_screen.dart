@@ -636,6 +636,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         debugPrint('⚠️ Location sharing failed, but emergency was created');
       }
 
+      // ALERT-DELIVERY HONESTY: tell the user how many contacts were
+      // actually reached — never a blind "success". The backend sends an
+      // honest warning when nobody (or only open apps) could be reached.
+      if (context.mounted) {
+        final messenger = ScaffoldMessenger.of(context);
+        if (result.warning != null) {
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text('⚠️ ${result.warning}'),
+              backgroundColor: Colors.red.shade700,
+              duration: const Duration(seconds: 8),
+            ),
+          );
+        } else {
+          final reached = result.reachedCount;
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(
+                reached == 1
+                    ? '✅ 1 contact alerted'
+                    : '✅ $reached contacts alerted',
+              ),
+              backgroundColor: Colors.green.shade700,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+
       // Update emergency provider - use safe access
       if (context.mounted) {
         final emergencyProvider = _getEmergencyProviderSafely();

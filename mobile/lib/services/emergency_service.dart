@@ -13,12 +13,29 @@ class EmergencyCreationResult {
   final bool locationShared;
   final String? existingEmergencyId; // If emergency already exists
 
+  // ALERT-DELIVERY HONESTY (Jun 2026 backend revamp): the create response
+  // now reports how many people were actually reached, plus an honest
+  // warning when nobody was. Response shape:
+  //   { emergency: {...}, participantsCount,
+  //     notifications: { alerted, socketOnly, failed: [...] }, warning? }
+  final int participantsCount; // invited participants (registered contacts)
+  final int alertedCount; // reached via push (FCM/web push)
+  final int socketOnlyCount; // only reached because their app was open
+  final String? warning; // honest backend warning when delivery is doubtful
+
+  /// Total contacts that got the alert through any channel.
+  int get reachedCount => alertedCount + socketOnlyCount;
+
   EmergencyCreationResult({
     required this.success,
     this.emergency,
     this.errorMessage,
     this.locationShared = false,
     this.existingEmergencyId,
+    this.participantsCount = 0,
+    this.alertedCount = 0,
+    this.socketOnlyCount = 0,
+    this.warning,
   });
 }
 
@@ -102,6 +119,18 @@ class EmergencyService {
         status: data['emergency']['status'] as String,
       );
 
+      // Alert-delivery honesty: how many people did we actually reach?
+      final participantsCount = (data['participantsCount'] as num?)?.toInt() ?? 0;
+      int alertedCount = 0;
+      int socketOnlyCount = 0;
+      final notifications = data['notifications'];
+      if (notifications is Map) {
+        alertedCount = (notifications['alerted'] as num?)?.toInt() ?? 0;
+        socketOnlyCount = (notifications['socketOnly'] as num?)?.toInt() ?? 0;
+      }
+      final warning = data['warning'] as String?;
+      debugPrint('📣 Delivery: $alertedCount alerted, $socketOnlyCount socket-only of $participantsCount participants${warning != null ? ' — WARNING: $warning' : ''}');
+
       // Step 2: Share location with retry logic
       bool locationShared = false;
       debugPrint('📍 Attempting to share location...');
@@ -148,6 +177,10 @@ class EmergencyService {
         success: true,
         emergency: emergency,
         locationShared: locationShared,
+        participantsCount: participantsCount,
+        alertedCount: alertedCount,
+        socketOnlyCount: socketOnlyCount,
+        warning: warning,
       );
     } on EmergencyCreationFailedException catch (e) {
       return EmergencyCreationResult(

@@ -56,12 +56,20 @@ class PanicButtonService {
         
         if (result.success && result.emergency != null) {
           debugPrint('✅ Emergency triggered from panic button: ${result.emergency!.id}');
-          
+
           // Update widget to show emergency active
           await updateWidget(emergencyActive: true);
-          
-          // Show success message
-          await _showWidgetMessage('Emergency activated!');
+
+          // ALERT-DELIVERY HONESTY: show how many contacts were actually
+          // reached (or the backend's warning) — never a blind success.
+          if (result.warning != null) {
+            await _showWidgetMessage('Emergency active — ${result.warning}');
+          } else {
+            final reached = result.reachedCount;
+            await _showWidgetMessage(
+              'Emergency active — $reached contact${reached == 1 ? '' : 's'} alerted',
+            );
+          }
         } else {
           debugPrint('❌ Failed to create emergency: ${result.errorMessage}');
           await _showWidgetError(result.errorMessage ?? 'Failed to trigger emergency');
