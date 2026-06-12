@@ -80,11 +80,17 @@ class AuthProvider with ChangeNotifier {
     }
   }
   
-  Future<bool> register(String email, String password) async {
+  /// [inviteToken] — optional invite-link token; when present the backend
+  /// links inviter + new user as mutual emergency contacts at registration.
+  /// NOTE: nothing passes this yet — the app has no deep-link handling to
+  /// receive /login?invite=<token> URLs (needs app_links/uni_links +
+  /// iOS Associated Domains / Android intent filters). Plumbed through so
+  /// wiring deep links later is a one-line change in RegisterScreen.
+  Future<bool> register(String email, String password, {String? inviteToken}) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
-    
+
     try {
       // Check connection first
       final isConnected = await ApiService.checkConnection();
@@ -94,8 +100,8 @@ class AuthProvider with ChangeNotifier {
         notifyListeners();
         return false;
       }
-      
-      await ApiService.register(email, password);
+
+      await ApiService.register(email, password, inviteToken: inviteToken);
       _isLoading = false;
       notifyListeners();
       return true;

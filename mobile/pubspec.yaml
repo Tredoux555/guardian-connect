@@ -57,6 +57,7 @@ dependencies:
   intl: ^0.18.1
   url_launcher: ^6.2.2
   permission_handler: ^11.1.0
+  share_plus: ^7.2.2  # Platform share sheet for contact invite links
   
   # Background Tasks
   workmanager: ^0.5.2  # Background tasks for battery-efficient polling

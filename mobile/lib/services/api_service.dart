@@ -422,10 +422,16 @@ class ApiService {
   }
   
   // Auth endpoints
-  static Future<Map<String, dynamic>> register(String email, String password) async {
+  /// [inviteToken] — optional stateless signed invite token (from a
+  /// contact's invite link, /login?invite=<token>). When supplied, the
+  /// backend makes inviter and new user mutual emergency contacts
+  /// (POST /auth/register accepts an optional `inviteToken` field and
+  /// returns `contactLinked: true` when linking succeeded).
+  static Future<Map<String, dynamic>> register(String email, String password, {String? inviteToken}) async {
     final response = await post('/auth/register', {
       'email': email,
       'password': password,
+      if (inviteToken != null && inviteToken.isNotEmpty) 'inviteToken': inviteToken,
     }, includeAuth: false);
     
     if (response.statusCode == 201) {

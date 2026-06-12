@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import '../services/api_service.dart';
 import 'dart:convert';
 
@@ -13,6 +15,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   List<dynamic> _contacts = [];
   bool _loading = true;
   bool _showAddForm = false;
+  bool _fetchingInviteLink = false;
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -102,6 +105,63 @@ class _ContactsScreenState extends State<ContactsScreen> {
     }
   }
 
+  /// INVITE BY LINK (Jun 2026 backend revamp): GET /contacts/invite-link
+  /// returns { inviteUrl, expiresInDays } — a stateless signed token.
+  /// Whoever registers through the link automatically becomes a MUTUAL
+  /// emergency contact (no exact-email guessing). Shared via the platform
+  /// share sheet, with clipboard copy as fallback.
+  Future<void> _inviteByLink() async {
+    if (_fetchingInviteLink) return;
+    setState(() => _fetchingInviteLink = true);
+
+    try {
+      final response = await ApiService.get('/contacts/invite-link');
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}');
+      }
+      final data = jsonDecode(response.body);
+      final inviteUrl = data['inviteUrl'] as String?;
+      final expiresInDays = (data['expiresInDays'] as num?)?.toInt() ?? 30;
+      if (inviteUrl == null || inviteUrl.isEmpty) {
+        throw Exception('No invite link in response');
+      }
+
+      final message =
+          'Join me on Guardian Connect so we can reach each other in an '
+          'emergency. Sign up with my invite link (valid $expiresInDays days) '
+          'and we\'ll automatically become each other\'s emergency contacts:\n'
+          '$inviteUrl';
+
+      try {
+        await Share.share(message, subject: 'Be my emergency contact on Guardian Connect');
+      } catch (shareError) {
+        // Share sheet unavailable (e.g. some emulators) — copy instead
+        debugPrint('⚠️ Share sheet failed, copying link instead: $shareError');
+        await Clipboard.setData(ClipboardData(text: inviteUrl));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Invite link copied to clipboard'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Failed to get invite link: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not create invite link: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _fetchingInviteLink = false);
+    }
+  }
+
   Future<void> _removeContact(String contactId) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -158,6 +218,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
         title: const Text('Emergency Contacts'),
         actions: [
           IconButton(
+            icon: _fetchingInviteLink
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.share),
+            tooltip: 'Invite by link',
+            onPressed: _fetchingInviteLink ? null : _inviteByLink,
+          ),
+          IconButton(
             icon: Icon(_showAddForm ? Icons.close : Icons.add),
             onPressed: () {
               setState(() {
@@ -202,6 +273,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                   fontSize: 14,
                                   color: Colors.grey,
                                 ),
+                              ),
+                              const SizedBox(height: 24),
+                              ElevatedButton.icon(
+                                onPressed: _fetchingInviteLink ? null : _inviteByLink,
+                                icon: const Icon(Icons.share),
+                                label: const Text('Invite by link'),
                               ),
                             ],
                           ),
