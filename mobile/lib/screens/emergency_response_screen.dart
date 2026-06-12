@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'dart:async';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../services/location_service.dart';
@@ -112,8 +111,9 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
         debugPrint('⚠️ Socket connection failed, continuing without real-time features: $e');
       }
 
-      // Start sharing location
-      _startLocationSharing();
+      // STATIC LOCATION MODEL: send location ONCE at accept. Further updates
+      // only happen via the explicit button on the emergency screen.
+      _sendLocationOnce();
 
       if (!mounted) return;
 
@@ -140,26 +140,24 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
     }
   }
 
-  void _startLocationSharing() {
-    // Start emergency location stream for maximum GPS accuracy
-    LocationService.getEmergencyLocationStream().listen((position) async {
-      try {
-        // Log GPS quality
-        if (LocationService.isGPSQuality(position)) {
-          print('✅ GPS-quality location: ${position.accuracy.toStringAsFixed(1)}m accuracy');
-        } else {
-          print('⚠️ Location accuracy: ${position.accuracy.toStringAsFixed(1)}m');
-        }
-        
-        await ApiService.post('/emergencies/${widget.emergencyId}/location', {
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'accuracy': position.accuracy, // Include accuracy for backend validation
-        });
-      } catch (e) {
-        print('❌ Error updating location: $e');
+  /// Send the responder's location ONCE at accept (static-location model —
+  /// the backend no longer expects continuous updates).
+  Future<void> _sendLocationOnce() async {
+    try {
+      final position = await LocationService.getEmergencyLocation();
+      if (position == null) {
+        debugPrint('⚠️ Could not get location to share at accept');
+        return;
       }
-    });
+      await ApiService.post('/emergencies/${widget.emergencyId}/location', {
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'accuracy': position.accuracy, // Include accuracy for backend validation
+      });
+      debugPrint('✅ Responder location sent once at accept');
+    } catch (e) {
+      debugPrint('❌ Error sending location at accept: $e');
+    }
   }
 
   Future<void> _rejectEmergency() async {

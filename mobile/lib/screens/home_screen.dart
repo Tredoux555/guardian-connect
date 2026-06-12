@@ -136,8 +136,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         debugPrint('⚠️ Socket connection failed, continuing: $e');
       }
 
-      // Start sharing location
-      _startLocationSharingForEmergency(emergencyId);
+      // STATIC LOCATION MODEL: send location ONCE at accept.
+      // Further updates only happen via the explicit "update my location"
+      // button on the emergency screen — no background polling.
+      _sendLocationOnceForEmergency(emergencyId);
 
       if (!mounted) return;
 
@@ -164,19 +166,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Start location sharing for emergency
-  void _startLocationSharingForEmergency(String emergencyId) {
-    LocationService.getEmergencyLocationStream().listen((position) async {
-      try {
-        await ApiService.post('/emergencies/$emergencyId/location', {
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'accuracy': position.accuracy,
-        });
-      } catch (e) {
-        debugPrint('❌ Error updating location: $e');
+  /// Send the responder's location ONCE at accept (static-location model —
+  /// the backend no longer expects continuous updates).
+  Future<void> _sendLocationOnceForEmergency(String emergencyId) async {
+    try {
+      final position = await LocationService.getEmergencyLocation();
+      if (position == null) {
+        debugPrint('⚠️ Could not get location to share at accept');
+        return;
       }
-    });
+      await ApiService.post('/emergencies/$emergencyId/location', {
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'accuracy': position.accuracy,
+      });
+      debugPrint('✅ Responder location sent once at accept');
+    } catch (e) {
+      debugPrint('❌ Error sending location at accept: $e');
+    }
   }
   
   /// Show prominent emergency alert dialog with loud alarm

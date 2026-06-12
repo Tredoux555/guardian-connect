@@ -27,8 +27,7 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
   final Set<Marker> _markers = {};
   Position? _currentPosition;
   LatLng? _emergencyLocation; // Sender's location (where emergency happened)
-  StreamSubscription<Position>? _locationSubscription;
-  Timer? _locationUpdateTimer;
+  bool _isUpdatingLocation = false; // Explicit "update my location" in progress
   String? _mapError;
   bool _mapInitialized = false;
   bool _hasNavigatedAway = false; // Guard to prevent multiple navigation attempts
@@ -112,11 +111,14 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
     // Request location permissions first (most important)
     await LocationService.requestPermissions();
     debugPrint('📍 Location permissions granted');
-    
-    // Use emergency location for maximum GPS accuracy
+
+    // STATIC LOCATION MODEL: location was already sent once at
+    // trigger/accept. Here we only take a one-shot read for the local map
+    // marker — no continuous tracking. Users press the explicit
+    // "update my location" button to send a fresh position.
     _currentPosition = await LocationService.getEmergencyLocation();
     debugPrint('📍 Location obtained: ${_currentPosition?.latitude}, ${_currentPosition?.longitude}');
-    
+
     // Update UI immediately with location
     if (mounted) {
       debugPrint('📍 Updating UI with location...');
@@ -125,9 +127,6 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
       });
       debugPrint('📍 UI updated, _currentPosition is: ${_currentPosition != null ? "NOT NULL" : "NULL"}');
     }
-
-    // Start location tracking with emergency accuracy
-    _startLocationTracking();
 
     // Load initial emergency data (don't wait for socket)
     _loadEmergencyData().catchError((e) {
@@ -266,52 +265,66 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
     return false;
   }
 
-  void _startLocationTracking() {
-    // Use emergency location stream for maximum GPS accuracy
-    _locationSubscription = LocationService.getEmergencyLocationStream().listen(
-      (position) {
-        if (mounted) {
-          // Log GPS quality
-          if (LocationService.isGPSQuality(position)) {
-            debugPrint('✅ GPS-quality location: ${position.accuracy.toStringAsFixed(1)}m accuracy');
-          } else {
-            debugPrint('⚠️ Location accuracy: ${position.accuracy.toStringAsFixed(1)}m (may not be GPS)');
-          }
-          
-          setState(() {
-            _currentPosition = position;
-          });
-          _updateMyLocation(position);
-        }
-      },
-      onError: (error) {
-        debugPrint('❌ Location stream error: $error');
-      },
-    );
-  }
+  /// STATIC LOCATION MODEL: explicit, user-initiated location update.
+  /// Takes one fresh GPS reading and POSTs it to the backend
+  /// (POST /emergencies/:id/location). No background streams, no polling.
+  Future<void> _updateMyLocationExplicitly() async {
+    if (_isUpdatingLocation) return;
+    setState(() => _isUpdatingLocation = true);
 
-  Future<void> _updateMyLocation(Position position) async {
     try {
-      // Only send if accuracy is GPS-quality (≤20m)
-      // This ensures we're using GPS, not WiFi/cell tower triangulation
-      if (LocationService.isGPSQuality(position)) {
-        debugPrint('✅ Sending GPS-quality location: ${position.accuracy.toStringAsFixed(1)}m');
-        await ApiService.post('/emergencies/${widget.emergencyId}/location', {
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'accuracy': position.accuracy, // Include accuracy for backend validation
-        });
+      final position = await LocationService.getEmergencyLocation();
+      if (position == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not get your location. Check GPS and permissions.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      debugPrint('📍 Explicit location update: ${position.latitude}, ${position.longitude} (accuracy: ${position.accuracy.toStringAsFixed(1)}m)');
+      final response = await ApiService.post('/emergencies/${widget.emergencyId}/location', {
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'accuracy': position.accuracy, // Backend rejects known fallback coords
+      });
+
+      if (!mounted) return;
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        setState(() => _currentPosition = position);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('📍 Your location was updated and shared'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
       } else {
-        // Still send, but log warning
-        debugPrint('⚠️ Sending location with lower accuracy: ${position.accuracy.toStringAsFixed(1)}m');
-        await ApiService.post('/emergencies/${widget.emergencyId}/location', {
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'accuracy': position.accuracy,
-        });
+        String message = 'Could not update location (${response.statusCode})';
+        try {
+          final body = jsonDecode(response.body);
+          if (body is Map && body['error'] is String) message = body['error'] as String;
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(message), backgroundColor: Colors.orange),
+        );
       }
     } catch (e) {
       debugPrint('❌ Error updating location: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not update location. Please try again.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUpdatingLocation = false);
     }
   }
 
@@ -1605,8 +1618,6 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
 
   @override
   void dispose() {
-    _locationUpdateTimer?.cancel();
-    _locationSubscription?.cancel();
     SocketService.leaveEmergency(widget.emergencyId);
     _hasNavigatedAway = true; // Prevent any further navigation attempts
     super.dispose();
@@ -1779,10 +1790,11 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                       right: 10,
                       child: FloatingActionButton(
                         mini: true,
+                        heroTag: 'mapTypeToggle',
                         onPressed: () {
                           setState(() {
-                            _mapType = _mapType == MapType.normal 
-                                ? MapType.satellite 
+                            _mapType = _mapType == MapType.normal
+                                ? MapType.satellite
                                 : MapType.normal;
                           });
                           debugPrint('🗺️ Map type changed to: $_mapType');
@@ -1792,6 +1804,26 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                           _mapType == MapType.normal ? Icons.satellite : Icons.map,
                           color: Colors.blue,
                         ),
+                      ),
+                    ),
+                    // Explicit "update my location" button (static-location
+                    // model: location is only re-sent when the user asks)
+                    Positioned(
+                      top: 110,
+                      right: 10,
+                      child: FloatingActionButton(
+                        mini: true,
+                        heroTag: 'updateMyLocation',
+                        tooltip: 'Update my location',
+                        onPressed: _isUpdatingLocation ? null : _updateMyLocationExplicitly,
+                        backgroundColor: Colors.white,
+                        child: _isUpdatingLocation
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.my_location, color: Colors.green),
                       ),
                     ),
                     // Responders banner for sender - show who's coming to help (TAPPABLE)

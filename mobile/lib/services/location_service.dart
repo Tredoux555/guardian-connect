@@ -124,50 +124,14 @@ class LocationService {
     }
   }
 
-  // Standard location stream (good accuracy)
-  static Stream<Position> getLocationStream() {
-    LogCollector.logLocation('Starting location stream with maximum GPS accuracy');
-    return Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best, // Maximum GPS accuracy
-        distanceFilter: 5, // Update every 5 meters (more frequent)
-        timeLimit: const Duration(seconds: 30),
-      ),
-    );
-  }
-
-  // Emergency location stream (maximum accuracy for active emergencies)
-  static Stream<Position> getEmergencyLocationStream({bool isActiveEmergency = false}) {
-    LogCollector.logLocation('Starting emergency location stream with best-for-navigation accuracy');
-    
-    // During active emergency, update more frequently
-    final distanceFilter = isActiveEmergency ? 1 : 3; // Every 1 meter during active emergency
-    
-    return Geolocator.getPositionStream(
-      locationSettings: LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation, // Best possible GPS accuracy
-        distanceFilter: distanceFilter, // Very frequent updates
-        timeLimit: const Duration(seconds: 60),
-      ),
-    ).timeout(
-      const Duration(seconds: 60),
-      onTimeout: (sink) {
-        LogCollector.logLocation('Location stream timeout - continuing with last known position', level: LogLevel.warning);
-        sink.close();
-      },
-    );
-  }
-  
-  /// Get high-frequency location stream for active emergency (updates every 1 meter)
-  static Stream<Position> getActiveEmergencyLocationStream() {
-    LogCollector.logLocation('Starting HIGH-FREQUENCY location stream for active emergency');
-    return Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 1, // Update every 1 meter
-      ),
-    );
-  }
+  // STATIC LOCATION MODEL (Jun 2026 backend revamp):
+  // The backend no longer expects continuous location polling. Location is
+  // captured ONCE at emergency trigger/accept, and only updated when the
+  // user explicitly presses the "update my location" button. The old
+  // continuous position streams (getLocationStream /
+  // getEmergencyLocationStream / getActiveEmergencyLocationStream) have
+  // been removed — use getCurrentLocation() / getEmergencyLocation() for
+  // one-shot reads instead.
 
   // Check if location accuracy is GPS-quality (≤20m typically indicates GPS)
   static bool isGPSQuality(Position position) {
