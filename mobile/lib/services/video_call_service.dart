@@ -12,6 +12,15 @@ import 'log_collector.dart' as logger;
 /// Video calling service for emergency communication
 /// Uses Agora RTC for real-time video/audio calls during emergencies
 /// NOTE: Currently disabled - requires Agora RTC package and App ID
+///
+/// BACKEND CONTRACT (Jun 2026 revamp): credentials come from
+/// GET /emergencies/:id/video-token (owner/participants only, active
+/// emergencies only) → { appId, channel: 'emergency_<id>', token|null,
+/// expiresIn }. Returns 503 { code: 'VIDEO_NOT_CONFIGURED' } when
+/// AGORA_APP_ID is unset — clients should hide the join button then.
+/// token is null in App-ID-only mode; non-null when AGORA_APP_CERTIFICATE
+/// is configured (pass it to joinChannel). Deliberately deferred until
+/// agora_rtc_engine can be installed (pod install blocked on this machine).
 class VideoCallService {
   // static RtcEngine? _engine; // Disabled until Agora is available
   static bool _isInitialized = false;

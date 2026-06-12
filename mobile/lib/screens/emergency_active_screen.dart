@@ -140,7 +140,7 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
     Future.delayed(const Duration(seconds: 10), () {
       if (mounted && !_mapInitialized && _mapError == null) {
         setState(() {
-          _mapError = 'Google Maps unavailable. Location tracking is still active.';
+          _mapError = 'Google Maps unavailable. Your shared location is still visible to responders.';
         });
         debugPrint('⚠️ Maps did not initialize within 10 seconds - showing fallback UI');
       }
@@ -781,6 +781,16 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
     });
   }
 
+  // AGORA VIDEO — DELIBERATELY DEFERRED (Jun 2026):
+  // The backend now has GET /emergencies/:id/video-token (participants
+  // only) returning { appId, channel, token|null, expiresIn }, or 503
+  // { code: 'VIDEO_NOT_CONFIGURED' } when AGORA_APP_ID isn't set.
+  // The native Agora join button would replace _launchVideoCall below,
+  // but it needs the agora_rtc_engine package (commented out in
+  // pubspec.yaml — CocoaPods downloads are blocked on this machine) and
+  // AGORA_APP_ID configured in Railway. Until then we keep the existing
+  // Jitsi web-room link as the working fallback.
+
   /// Generate a unique video call room URL based on emergency ID
   String _getVideoCallUrl() {
     // Use first 12 chars of emergency ID for readable room name
@@ -1266,7 +1276,7 @@ class _EmergencyActiveScreenState extends State<EmergencyActiveScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Location tracking is still active',
+                  'Your last shared location is still visible to responders',
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.grey[500],

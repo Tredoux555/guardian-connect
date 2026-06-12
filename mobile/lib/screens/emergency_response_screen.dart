@@ -26,6 +26,12 @@ class _EmergencyResponseScreenState extends State<EmergencyResponseScreen> {
   String _senderName = 'Someone'; // Default if not provided
   bool _isVideoCallLoading = false;
   
+  // AGORA VIDEO — DELIBERATELY DEFERRED: see the stub note in
+  // emergency_active_screen.dart. The native join button would call
+  // GET /emergencies/:id/video-token and join via agora_rtc_engine;
+  // until that package + AGORA_APP_ID are available, the Jitsi web room
+  // below stays as the working fallback.
+
   /// Generate a unique video call room URL based on emergency ID
   String _getVideoCallUrl() {
     final roomId = widget.emergencyId.replaceAll('-', '').substring(0, 12);
