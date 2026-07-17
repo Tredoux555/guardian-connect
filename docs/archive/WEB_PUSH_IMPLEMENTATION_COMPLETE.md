@@ -35,7 +35,7 @@ Add these lines to `backend/.env`:
 
 ```env
 VAPID_PUBLIC_KEY=BMyjEmeq3DB-hcL7pFKSWlSIkmhNl8Z3zPT__1lBTm7JeKks47d5ytdq5f1rBdToOmyF6cDJ68QbpWD_BRMn3tM
-VAPID_PRIVATE_KEY=ZfnkvwmkPfrCSp6SH0VCOLvI8eLPGWJ-L0y0m_fIEYM
+VAPID_PRIVATE_KEY=***REDACTED-ROTATE-BEFORE-REUSE*** (value scrubbed after a GitGuardian leak alert; never paste a real private key into a committed file -- set real values only in Railway env vars)
 VAPID_SUBJECT=mailto:admin@guardianconnect.com
 ```
 
